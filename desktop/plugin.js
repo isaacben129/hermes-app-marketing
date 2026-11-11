@@ -68,6 +68,11 @@ function MarketingPage({ ctx }) {
     setDrafts(drafts.map(item => item.id === selected.id ? { ...item, [field]: value, ...(item.source ? { review: 'blocked', ...(['slides', 'hypothesis', 'brief', 'hook', 'title'].includes(field) ? { claim: 'unreviewed', cta: 'unchecked' } : {}) } : {}) } : item))
     setDirty(true)
   }
+  const updateSlide = (index, value) => {
+    const slides = [...selected.slides]
+    slides[index] = value
+    updateDraft('slides', slides)
+  }
   const saveDraft = () => {
     const versioned = drafts.map(item => item.id === selected.id && item.source ? {
       ...item, versions: [...item.versions, { number: item.versions.length + 1, savedAt: new Date().toISOString(),
@@ -104,11 +109,6 @@ function MarketingPage({ ctx }) {
     setDirty(false)
     next()
     setNotice('')
-  }
-  const updateSlide = (index, value) => {
-    const slides = [...selected.slides]
-    slides[index] = value
-    updateDraft('slides', slides)
   }
   const titleNode = jsxs('header', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '14px', flexWrap: 'wrap' }, children: [jsxs('div', { children: [jsx('div', { style: { color: 'var(--ui-text-quaternary)', fontSize: '0.7rem', letterSpacing: '0.08em', textTransform: 'uppercase' }, children: 'APP MARKETING · LOCAL PROTOTYPE' }), jsx('h1', { style: { margin: '7px 0 4px', fontSize: '1.4rem', fontWeight: 600 }, children: selected ? selected.title : 'Marketing overview' }), jsx('div', { style: { ...MUTED, fontSize: '0.84rem' }, children: 'Slideshow workspace · no accounts, external services, or live business data.' })] }), selected ? button('← Overview', () => navigateTo(() => setSelectedId(null)), 'outline') : null] })
   const appTabs = jsx('div', { role: 'tablist', 'aria-label': 'App workspace', style: { display: 'flex', gap: '7px', flexWrap: 'wrap' }, children: ['All apps', ...APPS].map(item => jsx(Button, { role: 'tab', 'aria-selected': item === app, variant: item === app ? 'secondary' : 'ghost', onClick: () => navigateTo(() => { setApp(item); setSelectedId(null) }), children: item }, item)) })
