@@ -1,7 +1,27 @@
 import { Badge, Button, EmptyState, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, host } from '@hermes/plugin-sdk'
 import React, { useEffect, useState } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
-import { renderSlideshow, exportSlideshowZip } from './renderer-client.js'
+
+const RENDERER_BASE = 'http://127.0.0.1:8765/api'
+async function rendererPost(path, payload) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 30000)
+  try {
+    const response = await fetch(`${RENDERER_BASE}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal })
+    const data = await response.json()
+    if (!response.ok) throw new Error(data.error || 'Local renderer failed.')
+    return data
+  } finally { clearTimeout(timer) }
+}
+async function renderSlideshow(payload) {
+  const data = await rendererPost('render', payload)
+  return { ...data, slides: data.slides.map(slide => ({ ...slide, png: Uint8Array.from(atob(slide.pngBase64), c => c.charCodeAt(0)) })) }
+}
+async function exportSlideshowZip(rendered, source = {}) {
+  if (!rendered?.slides?.length) throw new Error('Render slides before exporting.')
+  const data = await rendererPost('export', { rendered: { ...rendered, slides: rendered.slides.map(slide => ({ ...slide, pngBase64: btoa(String.fromCharCode(...slide.png)) })) }, source })
+  return Uint8Array.from(atob(data.zipBase64), c => c.charCodeAt(0))
+}
 
 const ROUTE = '/marketing-system'
 const APPS = ['App A', 'App B', 'App C']
@@ -57,13 +77,8 @@ function MarketingPage({ ctx }) {
     setSelectedId(item.id)
     setDirty(false)
   }
-  const rendererAvailable = async () => {
-    try { await fetch('http://127.0.0.1:8765/api/health', { signal: AbortSignal.timeout(1000) }); return true }
-    catch { setRenderError('Start the local renderer: python3 renderer/server.py'); return false }
-  }
   const renderSlides = async () => {
-    if (!selected?.slides?.length || !(await rendererAvailable())) return
-    setRenderError('')
+    if (!selected?.slides?.length) return
     try { setRendered(await renderSlideshow({ title: selected.title, slides: selected.slides, theme: 'neutral' })) }
     catch (error) { setRenderError(error.message || 'Render failed.') }
   }

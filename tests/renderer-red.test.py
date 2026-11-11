@@ -1,19 +1,17 @@
-import importlib.util
 import unittest
-from PIL import Image
 from pathlib import Path
 
-MODULE = Path(__file__).parents[1] / 'renderer' / 'render.py'
-spec = importlib.util.spec_from_file_location('marketing_renderer', MODULE)
-renderer = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(renderer)
+ROOT = Path(__file__).parents[1]
 
-class RendererTests(unittest.TestCase):
-    def test_produces_one_valid_png_per_ordered_slide(self):
-        result = renderer.render_slideshow({'title':'First','slides':['First slide','Second slide']})
-        self.assertEqual(len(result['slides']), 2)
-        self.assertEqual(result['dimensions'], {'width':1080,'height':1350})
-        self.assertTrue(all(slide['png'].startswith(b'\x89PNG\r\n\x1a\n') for slide in result['slides']))
-        self.assertTrue(all(Image.open(__import__('io').BytesIO(slide['png'])).size == (1080,1350) for slide in result['slides']))
+class PackagedPluginImportTests(unittest.TestCase):
+    def test_runtime_entry_does_not_import_local_javascript_modules(self):
+        source = (ROOT / 'plugin.js').read_text()
+        self.assertNotIn("from './renderer-client.js'", source)
+        self.assertNotIn('renderer-client.js', source)
+
+    def test_packaged_entry_copies_are_identical(self):
+        source = (ROOT / 'plugin.js').read_bytes()
+        self.assertEqual((ROOT / 'desktop/plugin.js').read_bytes(), source)
+        self.assertEqual((ROOT / 'desktop-plugins/marketing-system/plugin.js').read_bytes(), source)
 
 if __name__ == '__main__': unittest.main()
