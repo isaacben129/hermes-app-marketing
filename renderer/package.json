@@ -1,0 +1,8 @@
+{
+  "name": "app-marketing-slide-renderer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local deterministic text-to-slide renderer for the Hermes app marketing plugin",
+  "runtime": "Python 3.10+ with Pillow",
+  "license": "MIT"
+}

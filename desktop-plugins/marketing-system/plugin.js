@@ -1,6 +1,7 @@
 import { Badge, Button, EmptyState, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, host } from '@hermes/plugin-sdk'
 import React, { useEffect, useState } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
+import { renderSlideshow, exportSlideshowZip } from './renderer-client.js'
 
 const ROUTE = '/marketing-system'
 const APPS = ['App A', 'App B', 'App C']
@@ -19,6 +20,8 @@ function MarketingPage({ ctx }) {
   const [drafts, setDrafts] = useState(() => ctx.storage.get('drafts', []))
   const [notice, setNotice] = useState('')
   const [dirty, setDirty] = useState(false)
+  const [rendered, setRendered] = useState(null)
+  const [renderError, setRenderError] = useState('')
   const dirtyRef = React.useRef(false)
   dirtyRef.current = dirty
   const records = [...drafts, ...SAMPLES]
@@ -54,8 +57,24 @@ function MarketingPage({ ctx }) {
     setSelectedId(item.id)
     setDirty(false)
   }
+  const rendererAvailable = async () => {
+    try { await fetch('http://127.0.0.1:8765/api/health', { signal: AbortSignal.timeout(1000) }); return true }
+    catch { setRenderError('Start the local renderer: python3 renderer/server.py'); return false }
+  }
+  const renderSlides = async () => {
+    if (!selected?.slides?.length || !(await rendererAvailable())) return
+    setRenderError('')
+    try { setRendered(await renderSlideshow({ title: selected.title, slides: selected.slides, theme: 'neutral' })) }
+    catch (error) { setRenderError(error.message || 'Render failed.') }
+  }
+  const downloadPng = (slide, index) => {
+    const url = URL.createObjectURL(new Blob([slide.png], { type: 'image/png' }))
+    const link = document.createElement('a'); link.href = url; link.download = `slide-${String(index + 1).padStart(2, '0')}.png`; link.click()
+    URL.revokeObjectURL(url)
+  }
   const generateCopy = () => {
     if (selected.slides.length && !window.confirm('Replace current slide copy? Saved versions remain available.')) return
+    setRendered(null)
     updateDraft('slides', [
       'What is one next step you could write down?',
       'Fictional example: this app lets you write one next step.',
@@ -67,6 +86,7 @@ function MarketingPage({ ctx }) {
     if (!selected?.isDraft) return
     setDrafts(drafts.map(item => item.id === selected.id ? { ...item, [field]: value, ...(item.source ? { review: 'blocked', ...(['slides', 'hypothesis', 'brief', 'hook', 'title'].includes(field) ? { claim: 'unreviewed', cta: 'unchecked' } : {}) } : {}) } : item))
     setDirty(true)
+    setRendered(null)
   }
   const updateSlide = (index, value) => {
     const slides = [...selected.slides]
@@ -106,6 +126,10 @@ function MarketingPage({ ctx }) {
   const navigateTo = next => {
     if (dirty && !window.confirm('Discard unsaved draft changes?')) return
     if (dirty) setDrafts(ctx.storage.get('drafts', []))
+    setRendered(null)
+    setRenderError('')
+    setNotice('')
+    setSelectedId(null)
     setDirty(false)
     next()
     setNotice('')
@@ -129,6 +153,14 @@ function MarketingPage({ ctx }) {
       input('Brief', selected.brief, value => updateDraft('brief', value)),
       input('Hypothesis', selected.hypothesis, value => updateDraft('hypothesis', value)),
       button('Generate static copy', generateCopy, 'outline', !selected.brief.trim() || !selected.hypothesis.trim()),
+      button('Render slides', renderSlides, 'secondary', !selected.slides.length),
+      renderError ? jsx('div', { role: 'alert', children: renderError }) : null,
+      rendered ? jsxs('section', { style: { display: 'grid', gap: '10px' }, children: [jsx('h3', { children: `Rendered preview · ${rendered.dimensions.width} × ${rendered.dimensions.height}` }), button('Download slide 1 PNG', () => downloadPng(rendered.slides[0], 0), 'outline'),
+      button('Export ZIP', async () => {
+        try { const zip = await exportSlideshowZip(rendered, { draftId: selected.id, title: selected.title, app: selected.app, sourceId: selected.source?.id || null }); const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' })); const link = document.createElement('a'); link.href = url; link.download = 'slideshow-export.zip'; link.click(); URL.revokeObjectURL(url); setNotice('ZIP exported locally with slide images and source manifest.') }
+        catch (error) { setRenderError(error.message || 'Export failed.') }
+      }, 'secondary'),
+      ...rendered.slides.map((slide, index) => jsxs('figure', { style: { ...PANEL, padding: '10px' }, children: [jsx('img', { src: `data:image/png;base64,${btoa(String.fromCharCode(...slide.png))}`, alt: `Rendered slide ${index + 1}`, style: { display: 'block', width: 'min(100%, 360px)', height: 'auto' } }), button(`Download slide ${index + 1} PNG`, () => downloadPng(slide, index), 'outline')] }, index))] }) : null,
       ...selected.slides.slice(1).map((_, index) => button(`Move slide ${index + 2} up`, () => {
         const slides = [...selected.slides]; [slides[index], slides[index + 1]] = [slides[index + 1], slides[index]]; updateDraft('slides', slides)
       })),

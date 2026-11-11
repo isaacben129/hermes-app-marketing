@@ -17,6 +17,12 @@ A local-first, app-agnostic workspace prototype for managing slideshow concepts 
 
 If your CLI does not list `plugins install`, check `hermes plugins --help` for the supported package installation command. The package entry is `desktop/plugin.js`; its source is `plugin.js`.
 
+## Local slide renderer
+
+Start the loopback-only service from the repository root with `python3 -m pip install -r renderer/requirements.txt && python3 renderer/server.py` (Windows: `py -m pip install -r renderer\requirements.txt && py renderer\server.py`). Keep it running while using **Render slides**. It binds only to 127.0.0.1:8765; the plugin checks `/api/health` before rendering. The service accepts only the Electron file origin or loopback HTTP, binds to localhost, caps requests, and makes no outbound calls. Start it manually; the plugin never launches a background process.
+
+The renderer creates deterministic text-only 1080×1350 PNGs from ordered slide copy, previews the results, supports individual PNG downloads, and exports a ZIP with numbered PNGs and a JSON source manifest. The built-in neutral/ink templates are generic, not app-branded, and not an approved Cherry design. No remote or user assets are accessed. Copy/claim/asset review remains required before campaign use.
+
 ## Local pipeline
 
 Open **Marketing → ＋ Fixture pipeline**. The entry creates a clearly marked fictional source (`fixture:focus-1`), an editable evidence-linked brief and untested hypothesis. **Generate static copy** creates four deterministic text slides locally; it uses no model or service. Edit slide text and move slides upward to change their order.
@@ -35,10 +41,11 @@ node --check desktop/plugin.js
 node --check desktop-plugins/marketing-system/plugin.js
 node tests/plugin-smoke.mjs
 node tests/pipeline.mjs
+python3 -m unittest tests/test_renderer.py tests/test_export.py tests/test_server.py -v
 git diff --check
 ```
 
-The pipeline test drives the registered UI through fixture creation, copy generation, edits, reordering, review gates, versioning, reopening, and discarding unsaved changes. It also checks all three plugin entry copies match.
+The pipeline test drives the registered UI through fixture creation, copy generation, edits, reordering, review gates, versioning, reopening, and discarding unsaved changes. It also checks all three plugin entry copies match. Python tests cover deterministic PNG output, ZIP provenance, HTTP render/export round trips, and rejection of remote origins.
 
 The smoke test exercises plugin registration, navigation, the overview metrics, three separate sample cards, and opening the corresponding detail view. It uses runtime stubs, so it does **not** replace verification in the actual Windows Desktop renderer.
 

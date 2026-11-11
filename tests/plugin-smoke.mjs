@@ -20,15 +20,18 @@ const react = {
   useRef(initial) { const index = hookIndex++; if (!state.has(index)) state.set(index, { current: initial }); return state.get(index) },
   useEffect() {}
 }
-const sdk = { Badge: 'Badge', Button: 'Button', EmptyState: 'EmptyState', ErrorState: 'ErrorState', Skeleton: 'Skeleton', ROUTES_AREA: 'routes', SIDEBAR_NAV_AREA: 'sidebar.nav', PALETTE_AREA: 'commandPalette', host: { navigate: route => navigations.push(route) }, useEffect: (...args) => react.useEffect(...args),   useState: (...args) => react.useState(...args), useRef: (...args) => react.useRef(...args) }
+const mockRenderSlideshow = async ({ slides }) => ({ dimensions: { width: 1080, height: 1350 }, slides: slides.map((_, index) => ({ index: index + 1, png: new Uint8Array([137,80,78,71]) })) })
+const sdk = { renderSlideshow: mockRenderSlideshow, Badge: 'Badge', Button: 'Button', EmptyState: 'EmptyState', ErrorState: 'ErrorState', Skeleton: 'Skeleton', ROUTES_AREA: 'routes', SIDEBAR_NAV_AREA: 'sidebar.nav', PALETTE_AREA: 'commandPalette', renderSlideshow: mockRenderSlideshow, host: { navigate: route => navigations.push(route) }, useEffect: (...args) => react.useEffect(...args),   useState: (...args) => react.useState(...args), useRef: (...args) => react.useRef(...args) }
 const registrations = []
 const ctx = { storage: { get: (key, fallback) => storage.has(key) ? storage.get(key) : fallback, set: (key, value) => storage.set(key, value), remove: key => storage.delete(key) }, register: item => registrations.push(item) }
-const context = vm.createContext({ require(name) { if (name === '@hermes/plugin-sdk') return sdk; if (name === 'react') return react; if (name === 'react/jsx-runtime') return { Fragment, jsx, jsxs: jsx }; throw new Error(`Unexpected import ${name}`) }, window: { confirm: () => true, addEventListener() {}, removeEventListener() {} }, Date })
+const context = vm.createContext({ require(name) { if (name === '@hermes/plugin-sdk') return sdk; if (name === 'react') return react; if (name === 'react/jsx-runtime') return { Fragment, jsx, jsxs: jsx }; if (name === './renderer-client.js') return { renderSlideshow: mockRenderSlideshow, exportSlideshowZip: async () => new Uint8Array([80,75,3,4]) }; throw new Error(`Unexpected import ${name}`) }, window: { confirm: () => true, addEventListener() {}, removeEventListener() {} }, btoa: value => Buffer.from(value, 'binary').toString('base64'), Date })
 vm.runInContext(code.replace('export default {', 'globalThis.plugin = {'), context)
 const plugin = context.plugin
 assert.equal(plugin.id, 'marketing-system')
 assert.equal(plugin.name, 'App Marketing')
 assert.match(source, /--ui-radius-sm, 4px/)
+assert.match(source, /renderer-client.js/)
+assert.match(source, /rendererAvailable/)
 assert.doesNotMatch(source, /PANEL = \{[^\n]*--ui-radius-md/)
 plugin.register(ctx)
 assert.deepEqual(Array.from(registrations, item => item.area), ['routes', 'sidebar.nav', 'commandPalette'])

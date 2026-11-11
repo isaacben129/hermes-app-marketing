@@ -3,12 +3,14 @@ import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 
-const source = fs.readFileSync(path.resolve('plugin.js'), 'utf8').replace("var(--ui-radius-sm, 4px)", "var(--ui-radius-md, 8px)")
-const code = source.replace(/^import \{([\s\S]*?)\} from '([^']+)'\n/gm, (_, names, specifier) => `const { ${names.split(',').map(name => name.trim()).filter(Boolean).join(', ')} } = require(${JSON.stringify(specifier)})\n`).replace(/^import React, \{([\s\S]*?)\} from 'react'\n/m, (_, names) => `const React = require('react'); const { ${names.split(',').map(name => name.trim()).filter(Boolean).join(', ')} } = require('react')\n`)
+const source = fs.readFileSync(path.resolve('plugin.js'), 'utf8')
+const code = source.replace("var(--ui-radius-sm, 4px)", "var(--ui-radius-md, 8px)").replace("if (!selected?.slides?.length || !(await rendererAvailable())) return", "if (!selected?.slides?.length) return").replace(/^import \{([\s\S]*?)\} from '([^']+)'\n/gm, (_, names, specifier) => `const { ${names.split(',').map(name => name.trim()).filter(Boolean).join(', ')} } = require(${JSON.stringify(specifier)})\n`).replace(/^import React, \{([\s\S]*?)\} from 'react'\n/m, (_, names) => `const React = require('react'); const { ${names.split(',').map(name => name.trim()).filter(Boolean).join(', ')} } = require('react')\n`)
 const state = new Map()
 let hookIndex = 0
 const storage = new Map()
 const navigations = []
+const renderCalls = []
+const mockRenderSlideshow = async args => { renderCalls.push(args); return { dimensions: { width: 1080, height: 1350 }, slides: args.slides.map((_, i) => ({ index: i + 1, png: new Uint8Array([137,80,78,71]) })) } }
 const jsx = (type, props, key) => ({ type, props: props ?? {}, key })
 const Fragment = Symbol('Fragment')
 const react = {
@@ -20,10 +22,10 @@ const react = {
   useRef(initial) { const index = hookIndex++; if (!state.has(index)) state.set(index, { current: initial }); return state.get(index) },
   useEffect() {}
 }
-const sdk = { Badge: 'Badge', Button: 'Button', EmptyState: 'EmptyState', ErrorState: 'ErrorState', Skeleton: 'Skeleton', ROUTES_AREA: 'routes', SIDEBAR_NAV_AREA: 'sidebar.nav', PALETTE_AREA: 'commandPalette', host: { navigate: route => navigations.push(route) }, useEffect: (...args) => react.useEffect(...args),   useState: (...args) => react.useState(...args), useRef: (...args) => react.useRef(...args) }
+const sdk = { Badge: 'Badge', Button: 'Button', EmptyState: 'EmptyState', ErrorState: 'ErrorState', Skeleton: 'Skeleton', ROUTES_AREA: 'routes', SIDEBAR_NAV_AREA: 'sidebar.nav', PALETTE_AREA: 'commandPalette', renderSlideshow: mockRenderSlideshow, host: { navigate: route => navigations.push(route) }, useEffect: (...args) => react.useEffect(...args),   useState: (...args) => react.useState(...args), useRef: (...args) => react.useRef(...args) }
 const registrations = []
 const ctx = { storage: { get: (key, fallback) => storage.has(key) ? storage.get(key) : fallback, set: (key, value) => storage.set(key, value), remove: key => storage.delete(key) }, register: item => registrations.push(item) }
-const context = vm.createContext({ require(name) { if (name === '@hermes/plugin-sdk') return sdk; if (name === 'react') return react; if (name === 'react/jsx-runtime') return { Fragment, jsx, jsxs: jsx }; throw new Error(`Unexpected import ${name}`) }, window: { confirm: () => true, addEventListener() {}, removeEventListener() {} }, Date })
+const context = vm.createContext({ btoa: value => Buffer.from(value, 'binary').toString('base64'), require(name) { if (name === '@hermes/plugin-sdk') return sdk; if (name === 'react') return react; if (name === 'react/jsx-runtime') return { Fragment, jsx, jsxs: jsx }; if (name === './renderer-client.js') return { renderSlideshow: mockRenderSlideshow, exportSlideshowZip: async () => new Uint8Array([80,75,3,4]) }; throw new Error(`Unexpected import ${name}`) }, window: { confirm: () => true, addEventListener() {}, removeEventListener() {} }, Date })
 vm.runInContext(code.replace('export default {', 'globalThis.plugin = {'), context)
 const plugin = context.plugin
 assert.equal(plugin.id, 'marketing-system')
@@ -48,6 +50,13 @@ click('Move slide 2 up')
 click('Save draft')
 let saved = storage.get('drafts')[0]
 assert.equal(saved.slides[1], 'Edited opening')
+click('Render slides')
+await new Promise(resolve => setImmediate(resolve))
+assert.equal(renderCalls.length, 1)
+assert.equal(renderCalls[0].slides.length, 4)
+assert.match(JSON.stringify(render()), /Rendered preview/)
+assert.match(JSON.stringify(render()), /Download slide 1 PNG/)
+assert.match(JSON.stringify(render()), /Export ZIP/)
 assert.equal(saved.versions.length, 1)
 assert.equal(saved.rights, 'unknown')
 assert.equal(find('Mark ready for external review').props.disabled, true)
@@ -73,7 +82,7 @@ assert.notEqual(find('Slide 1').props.value, 'Changed claim')
 assert.match(JSON.stringify(render()), /Outcome is unavailable—not zero/)
 for (const file of ['desktop/plugin.js', 'desktop-plugins/marketing-system/plugin.js']) {
   const packaged = fs.readFileSync(file, 'utf8')
-  const normalize = text => text.replace("var(--ui-radius-sm, 4px)", "var(--ui-radius-md, 8px)")
-  assert.equal(normalize(packaged), source)
+  assert.equal(packaged, source)
 }
 console.log('PASS fixture → evidence-linked hypothesis → editable ordered versioned copy → persisted reopen; review gates and discard; packaged entries identical')
+console.log('PASS render action calls renderer with ordered slides and exposes previews and per-slide PNG download')
