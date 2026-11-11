@@ -11,7 +11,7 @@ const SAMPLES = [
 ]
 const BORDER = 'var(--ui-stroke-secondary)'
 const MUTED = { color: 'var(--ui-text-tertiary)' }
-const PANEL = { border: `1px solid ${BORDER}`, borderRadius: 'var(--ui-radius-md, 8px)', background: 'color-mix(in srgb, var(--ui-text-secondary) 2%, transparent)' }
+const PANEL = { border: `1px solid ${BORDER}`, borderRadius: 'var(--ui-radius-sm, 4px)', background: 'color-mix(in srgb, var(--ui-text-secondary) 2%, transparent)' }
 
 function MarketingPage({ ctx }) {
   const [app, setApp] = useState('All apps')

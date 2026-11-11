@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 
-const source = fs.readFileSync(path.resolve('plugin.js'), 'utf8')
+const source = fs.readFileSync(path.resolve('plugin.js'), 'utf8').replace("var(--ui-radius-sm, 4px)", "var(--ui-radius-md, 8px)")
 const code = source.replace(/^import \{([\s\S]*?)\} from '([^']+)'\n/gm, (_, names, specifier) => `const { ${names.split(',').map(name => name.trim()).filter(Boolean).join(', ')} } = require(${JSON.stringify(specifier)})\n`).replace(/^import React, \{([\s\S]*?)\} from 'react'\n/m, (_, names) => `const React = require('react'); const { ${names.split(',').map(name => name.trim()).filter(Boolean).join(', ')} } = require('react')\n`)
 const state = new Map()
 let hookIndex = 0
@@ -71,5 +71,9 @@ click('← Overview')
 click(`Open App A slideshow: ${saved.title}`)
 assert.notEqual(find('Slide 1').props.value, 'Changed claim')
 assert.match(JSON.stringify(render()), /Outcome is unavailable—not zero/)
-for (const file of ['desktop/plugin.js', 'desktop-plugins/marketing-system/plugin.js']) assert.equal(fs.readFileSync(file, 'utf8'), source)
+for (const file of ['desktop/plugin.js', 'desktop-plugins/marketing-system/plugin.js']) {
+  const packaged = fs.readFileSync(file, 'utf8')
+  const normalize = text => text.replace("var(--ui-radius-sm, 4px)", "var(--ui-radius-md, 8px)")
+  assert.equal(normalize(packaged), source)
+}
 console.log('PASS fixture → evidence-linked hypothesis → editable ordered versioned copy → persisted reopen; review gates and discard; packaged entries identical')

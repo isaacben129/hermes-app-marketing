@@ -28,6 +28,8 @@ vm.runInContext(code.replace('export default {', 'globalThis.plugin = {'), conte
 const plugin = context.plugin
 assert.equal(plugin.id, 'marketing-system')
 assert.equal(plugin.name, 'App Marketing')
+assert.match(source, /--ui-radius-sm, 4px/)
+assert.doesNotMatch(source, /PANEL = \{[^\n]*--ui-radius-md/)
 plugin.register(ctx)
 assert.deepEqual(Array.from(registrations, item => item.area), ['routes', 'sidebar.nav', 'commandPalette'])
 registrations[2].data.run()
