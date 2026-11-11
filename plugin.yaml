@@ -1,0 +1,6 @@
+name: marketing-system
+version: 0.1.0
+description: App-agnostic Hermes Desktop slideshow workspace prototype with fictional App A/B/C examples.
+license: MIT
+tags: [marketing, desktop, slideshow, local-prototype]
+desktop: desktop/plugin.js
