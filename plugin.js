@@ -40,13 +40,42 @@ function MarketingPage({ ctx }) {
   const fieldLabel = { display: 'grid', gap: '6px', color: 'var(--ui-text-secondary)', fontSize: '0.8rem' }
   const fieldStyle = { border: `1px solid ${BORDER}`, borderRadius: 'var(--ui-radius-md, 8px)', background: 'transparent', color: 'var(--ui-text-primary)', padding: '9px 10px', font: 'inherit' }
 
+  const reviewReady = item => item.rights === 'cleared' && item.claim === 'supported' && item.cta === 'checked' && item.slides.length > 0
+  const createPipeline = () => {
+    const item = { id: `pipeline-${Date.now()}`, app: app === 'All apps' ? 'App A' : app,
+      title: 'Fictional focus app · static copy', isDraft: true, stage: 'Draft', hook: '', slides: [],
+      source: { id: 'fixture:focus-1', kind: 'Fictional fixture', evidence: 'This fictional app lets a user write one next step. This is invented product context, not evidence of effectiveness.' },
+      brief: 'Introduce the fictional one-next-step feature to readers who want a simple starting point.',
+      hypothesis: 'Showing one concrete next step may make the feature easier to understand. Untested hypothesis.',
+      rights: 'unknown', claim: 'unreviewed', cta: 'unchecked', review: 'blocked', versions: [] }
+    const next = [item, ...drafts]
+    ctx.storage.set('drafts', next)
+    setDrafts(next)
+    setSelectedId(item.id)
+    setDirty(false)
+  }
+  const generateCopy = () => {
+    if (selected.slides.length && !window.confirm('Replace current slide copy? Saved versions remain available.')) return
+    updateDraft('slides', [
+      'What is one next step you could write down?',
+      'Fictional example: this app lets you write one next step.',
+      `Concept to explore: ${selected.hypothesis}`,
+      'Try writing a next step on paper. No destination or account required.'
+    ])
+  }
   const updateDraft = (field, value) => {
     if (!selected?.isDraft) return
-    setDrafts(drafts.map(item => item.id === selected.id ? { ...item, [field]: value } : item))
+    setDrafts(drafts.map(item => item.id === selected.id ? { ...item, [field]: value, ...(item.source ? { review: 'blocked', ...(['slides', 'hypothesis', 'brief', 'hook', 'title'].includes(field) ? { claim: 'unreviewed', cta: 'unchecked' } : {}) } : {}) } : item))
     setDirty(true)
   }
   const saveDraft = () => {
-    ctx.storage.set('drafts', drafts)
+    const versioned = drafts.map(item => item.id === selected.id && item.source ? {
+      ...item, versions: [...item.versions, { number: item.versions.length + 1, savedAt: new Date().toISOString(),
+        title: item.title, source: { ...item.source }, brief: item.brief, hypothesis: item.hypothesis,
+        slides: [...item.slides], rights: item.rights, claim: item.claim, cta: item.cta, review: item.review }]
+    } : item)
+    ctx.storage.set('drafts', versioned)
+    setDrafts(versioned)
     setDirty(false)
     setNotice('Draft saved in this Hermes plugin on this device.')
   }
@@ -71,6 +100,7 @@ function MarketingPage({ ctx }) {
   }
   const navigateTo = next => {
     if (dirty && !window.confirm('Discard unsaved draft changes?')) return
+    if (dirty) setDrafts(ctx.storage.get('drafts', []))
     setDirty(false)
     next()
     setNotice('')
@@ -85,14 +115,37 @@ function MarketingPage({ ctx }) {
   const metric = (label, caption) => jsxs('section', { style: { ...PANEL, minWidth: '0', flex: '1 1 185px', padding: '13px 15px' }, children: [jsx('div', { style: { color: 'var(--ui-text-quaternary)', fontSize: '0.7rem', textTransform: 'uppercase' }, children: label }), jsx('div', { style: { marginTop: '7px', fontSize: '1.4rem', fontWeight: 600 }, children: '—' }), jsx('div', { style: { ...MUTED, fontSize: '0.77rem', marginTop: '3px' }, children: caption })] })
   const sampleCard = item => jsx('button', { type: 'button', 'aria-label': `Open ${item.app} slideshow: ${item.title}`, onClick: () => navigateTo(() => setSelectedId(item.id)), style: { ...PANEL, display: 'flex', flexDirection: 'column', gap: '10px', minWidth: '0', minHeight: '160px', padding: '14px', textAlign: 'left', color: 'inherit', cursor: 'pointer' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '7px', flexWrap: 'wrap' }, children: [badge(item.app, true), badge(item.isDraft ? 'Local draft' : item.stage)] }), jsx('div', { style: { fontSize: '0.98rem', fontWeight: 600 }, children: item.title }), jsx('div', { style: { ...MUTED, fontSize: '0.79rem' }, children: item.isDraft ? 'Saved only in this Hermes plugin' : item.format }), jsx('div', { style: { ...MUTED, fontSize: '0.82rem', lineHeight: 1.45 }, children: item.hook || 'Add an opening hook in the detail editor.' }), jsx('div', { style: { color: 'var(--ui-text-quaternary)', fontSize: '0.73rem', marginTop: 'auto' }, children: item.isDraft ? 'Local draft · Open details →' : 'Illustrative sample · Open details →' })] }, item.id)
 
-  const overview = jsxs(Fragment, { children: [titleNode, appTabs, jsx('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '9px' }, children: [metric('Qualified activations', 'Not connected'), metric('Paid conversions', 'Not connected'), metric('Attributable revenue', 'Not connected')] }), jsxs('section', { style: { display: 'grid', gap: '10px' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }, children: [jsxs('div', { children: [jsx('h2', { style: { margin: 0, fontSize: '1rem', fontWeight: 600 }, children: 'Slideshow concepts' }), jsx('div', { style: { ...MUTED, fontSize: '0.77rem', marginTop: '3px' }, children: `${cards.length} cards · examples are fictional` })] }), button('＋ New local draft', createDraft, 'secondary')] }), cards.length ? jsx('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '10px' }, children: cards.map(sampleCard) }) : jsx(EmptyState, { title: 'No concepts yet', description: 'Add a local draft for this app workspace.' })] })] })
+  const overview = jsxs(Fragment, { children: [titleNode, appTabs, jsx('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '9px' }, children: [metric('Qualified activations', 'Not connected'), metric('Paid conversions', 'Not connected'), metric('Attributable revenue', 'Not connected')] }), jsxs('section', { style: { display: 'grid', gap: '10px' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }, children: [jsxs('div', { children: [jsx('h2', { style: { margin: 0, fontSize: '1rem', fontWeight: 600 }, children: 'Slideshow concepts' }), jsx('div', { style: { ...MUTED, fontSize: '0.77rem', marginTop: '3px' }, children: `${cards.length} cards · examples are fictional` })] }), button('＋ New local draft', createDraft, 'secondary'), button('＋ Fixture pipeline', createPipeline, 'secondary')] }), cards.length ? jsx('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '10px' }, children: cards.map(sampleCard) }) : jsx(EmptyState, { title: 'No concepts yet', description: 'Add a local draft for this app workspace.' })] })] })
   let detail = null
   if (selected) {
     const slideNodes = selected.slides.length ? jsx('ol', { style: { display: 'grid', gap: '7px', margin: 0, paddingLeft: '23px' }, children: selected.slides.map((slide, index) => jsx('li', { style: { padding: '5px 2px' }, children: selected.isDraft ? jsx('textarea', { 'aria-label': `Slide ${index + 1}`, value: slide, rows: 2, onChange: event => updateSlide(index, event.target.value), style: { ...fieldStyle, width: '100%', resize: 'vertical' } }) : slide }, `${selected.id}-${index}`)) }) : jsx('div', { style: MUTED, children: 'No slides yet. Add a slide to start this draft.' })
     const editor = jsxs('section', { style: { ...PANEL, display: 'grid', gap: '11px', padding: '14px' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }, children: [jsx('h2', { style: { margin: 0, fontSize: '1rem' }, children: 'Slideshow details' }), selected.isDraft ? jsxs('div', { style: { display: 'flex', gap: '7px' }, children: [button(dirty ? 'Save draft' : 'Saved', saveDraft, 'secondary', !dirty), button('Delete draft', deleteDraft, 'outline')] }) : badge('Read-only sample')] }), selected.isDraft ? jsx('label', { style: fieldLabel, children: ['Draft title', jsx('input', { 'aria-label': 'Draft title', value: selected.title, onChange: event => updateDraft('title', event.target.value), style: fieldStyle })] }) : jsx('div', { children: selected.title }), selected.isDraft ? jsx('label', { style: fieldLabel, children: ['Opening hook', jsx('textarea', { 'aria-label': 'Opening hook', value: selected.hook, rows: 3, onChange: event => updateDraft('hook', event.target.value), style: { ...fieldStyle, resize: 'vertical' } })] }) : jsx('div', { style: MUTED, children: selected.hook }), jsx('div', { style: { color: 'var(--ui-text-secondary)', fontSize: '0.78rem', textTransform: 'uppercase' }, children: 'Ordered slides' }), slideNodes, selected.isDraft ? jsxs('div', { style: { display: 'flex', gap: '7px', flexWrap: 'wrap' }, children: [button('＋ Add slide', () => updateDraft('slides', [...selected.slides, '']), 'outline'), selected.slides.length ? button('Remove last slide', () => updateDraft('slides', selected.slides.slice(0, -1)), 'outline') : null] }) : null] })
-    const review = jsxs('section', { style: { ...PANEL, display: 'grid', gap: '7px', padding: '13px 15px' }, children: [jsx('h2', { style: { margin: 0, fontSize: '0.92rem' }, children: 'Review before any external use' }), ...['Claim evidence: not provided', 'CTA destination: not connected', 'Asset rights and provenance: not provided', 'Human approval: required before sharing'].map(text => jsx('div', { style: { ...MUTED, fontSize: '0.79rem' }, children: text }, text))] })
+    const input = (label, value, onChange) => jsx('label', { style: fieldLabel, children: [label, jsx('textarea', { 'aria-label': label, value, onChange: e => onChange(e.target.value), style: fieldStyle })] })
+    const status = (label, field, options) => jsx('label', { style: fieldLabel, children: [label, jsx('select', { 'aria-label': label, value: selected[field], onChange: e => updateDraft(field, e.target.value), children: options.map(value => jsx('option', { value, children: value }, value)) })] })
+    const pipeline = selected.source ? jsxs('section', { style: { ...PANEL, padding: '14px', display: 'grid', gap: '10px' }, children: [
+      jsx('h2', { children: 'Local fixture pipeline' }),
+      jsx('p', { children: `${selected.source.kind} · ${selected.source.id}: ${selected.source.evidence}` }),
+      jsx('p', { children: `Brief, hypothesis and all slide copy derive from ${selected.source.id}. Copy is a proposal, not validated performance or product claims.` }),
+      input('Brief', selected.brief, value => updateDraft('brief', value)),
+      input('Hypothesis', selected.hypothesis, value => updateDraft('hypothesis', value)),
+      button('Generate static copy', generateCopy, 'outline', !selected.brief.trim() || !selected.hypothesis.trim()),
+      ...selected.slides.slice(1).map((_, index) => button(`Move slide ${index + 2} up`, () => {
+        const slides = [...selected.slides]; [slides[index], slides[index + 1]] = [slides[index + 1], slides[index]]; updateDraft('slides', slides)
+      })),
+      status('Rights status', 'rights', ['unknown', 'cleared', 'restricted']),
+      status('Claim status', 'claim', ['unreviewed', 'supported', 'unsupported']),
+      status('CTA status', 'cta', ['unchecked', 'checked', 'blocked']),
+      jsx('p', { children: `External review: ${selected.review}. Unknown or restricted rights block readiness. Statuses are local human attestations; nothing is sent.` }),
+      button('Mark ready for external review', () => {
+        if (!reviewReady(selected)) return
+        setDrafts(drafts.map(item => item.id === selected.id ? { ...item, review: 'ready' } : item)); setDirty(true)
+      }, 'outline', !reviewReady(selected)),
+      jsx('h3', { children: 'Saved versions' }),
+      ...selected.versions.map(version => jsx('details', { children: [jsx('summary', { children: `Version ${version.number} · ${version.savedAt}` }), jsx('pre', { style: { whiteSpace: 'pre-wrap' }, children: JSON.stringify(version, null, 2) })] }, version.number))
+    ] }) : null
+    const review = jsxs('section', { style: { ...PANEL, display: 'grid', gap: '7px', padding: '13px 15px' }, children: [jsx('h2', { style: { margin: 0, fontSize: '0.92rem' }, children: 'Review before any external use' }), ...(selected.source ? [`Claim evidence: ${selected.source.id} · ${selected.claim}`, `CTA: ${selected.cta}`, `Rights: ${selected.rights}`] : ['Claim evidence: not provided', 'CTA destination: not connected', 'Asset rights and provenance: not provided', 'Human approval: required before sharing']).map(text => jsx('div', { style: { ...MUTED, fontSize: '0.79rem' }, children: text }, text))] })
     const performance = jsxs('section', { style: { ...PANEL, display: 'grid', gap: '7px', padding: '13px 15px' }, children: [jsx('h2', { style: { margin: 0, fontSize: '0.92rem' }, children: 'Performance' }), jsx('div', { style: { ...MUTED, fontSize: '0.82rem' }, children: 'No platform or attribution data connected. Outcome is unavailable—not zero.' })] })
-    detail = jsxs(Fragment, { children: [titleNode, appTabs, jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }, children: [jsx('span', { style: { color: 'var(--ui-text-secondary)', fontSize: '0.78rem' }, children: `Status · ${selected.stage}` }), selected.isDraft ? badge(dirty ? 'Unsaved changes' : 'Local draft', true) : badge('Sample creative only')] }), editor, review, performance, notice ? jsx('div', { role: 'status', 'aria-live': 'polite', style: MUTED, children: notice }) : null] })
+    detail = jsxs(Fragment, { children: [titleNode, appTabs, jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }, children: [jsx('span', { style: { color: 'var(--ui-text-secondary)', fontSize: '0.78rem' }, children: `Status · ${selected.stage}` }), selected.isDraft ? badge(dirty ? 'Unsaved changes' : 'Local draft', true) : badge('Sample creative only')] }), editor, pipeline, review, performance, notice ? jsx('div', { role: 'status', 'aria-live': 'polite', style: MUTED, children: notice }) : null] })
   }
   return jsx('main', { className: 'h-full overflow-y-auto px-4 py-5 sm:px-6 lg:px-8', children: jsx('div', { style: { maxWidth: '1120px', margin: '0 auto', display: 'grid', gap: '15px', paddingBottom: '20px' }, children: selected ? detail : overview }) })
 }

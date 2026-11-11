@@ -45,7 +45,7 @@ state.set(1, 'sample-b1')
 root = render()
 const detail = root.props.children.props.children
 assert.equal(detail.props.children[0].props.children[0].props.children[1].props.children, 'One useful thing, made clear')
-assert.match(source, /ctx\.storage\.set\('drafts', drafts\)/)
+assert.match(source, /ctx\.storage\.set\('drafts', versioned\)/)
 assert.match(source, /Review before any external use/)
 assert.match(source, /Outcome is unavailable—not zero/)
 console.log('PASS plugin ESM evaluates with Hermes SDK/React runtime stubs')
