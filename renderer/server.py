@@ -29,17 +29,17 @@ class Handler(BaseHTTPRequestHandler):
             payload=json.loads(self.rfile.read(size))
             if self.path == '/api/render':
                 rendered=render_slideshow(payload)
-                result={'dimensions':rendered['dimensions'],'theme':rendered['theme'],'slides':[{'index':s['index'],'width':s['width'],'height':s['height'],'pngBase64':base64.b64encode(s['png']).decode('ascii')} for s in rendered['slides']]}
+                result={'dimensions':rendered['dimensions'],'slides':[{'index':s['index'],'width':s['width'],'height':s['height'],'pngBase64':base64.b64encode(s['png']).decode('ascii'),'source_ref':s.get('source_ref'),'image_sha256':s.get('image_sha256')} for s in rendered['slides']]}
                 body=json.dumps(result).encode()
             else:
                 rendered=payload.get('rendered') or {}; slides=rendered.get('slides') or []
                 if not 1 <= len(slides) <= 20: raise ValueError('Export must contain 1–20 slides.')
-                output=io.BytesIO(); manifest={'format':'APP Marketing local slideshow export','version':1,'dimensions':rendered.get('dimensions'),'theme':rendered.get('theme'),'source':payload.get('source') or {},'files':[]}
+                output=io.BytesIO(); manifest={'format':'app-agnostic-image-text-slideshow','version':1,'dimensions':rendered.get('dimensions'),'source':payload.get('source') or {},'files':[],'slides':[]}
                 with zipfile.ZipFile(output,'w',compression=zipfile.ZIP_DEFLATED) as archive:
                     for slide in slides:
                         name=f"slide-{int(slide['index']):02d}.png"; png=base64.b64decode(slide.get('pngBase64',''),validate=True)
                         if not png.startswith(b'\x89PNG\r\n\x1a\n'): raise ValueError('Export contains an invalid PNG.')
-                        archive.writestr(name,png); manifest['files'].append(name)
+                        archive.writestr(name,png); manifest['files'].append(name); manifest['slides'].append({'index':int(slide['index']),'file':name,'source_ref':slide.get('source_ref'),'image_sha256':slide.get('image_sha256')})
                     archive.writestr('manifest.json',json.dumps(manifest,indent=2))
                 body=json.dumps({'zipBase64':base64.b64encode(output.getvalue()).decode('ascii')}).encode()
             if len(body)>MAX_RESPONSE_BYTES: raise ValueError('Rendered response too large.')
