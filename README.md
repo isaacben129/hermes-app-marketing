@@ -6,8 +6,10 @@ A local-first, app-agnostic workspace prototype for managing slideshow concepts 
 
 - An overview that limits itself to business outcome measures. Since no analytics are connected, unavailable outcomes are shown as unavailable—not zero or fabricated performance.
 - Separate, tappable cards for each sample slideshow, with a detail/editor view.
-- Local draft persistence in Hermes plugin storage.
-- Explicit fictional/sample labeling and content-rights/review reminders.
+- Local draft persistence in Hermes plugin storage, plus a separate versioned record contract and durable local event/job ledger library.
+- Explicit fictional/sample labeling and evidence/rights readiness gates.
+- An independently implemented image-plus-text PNG renderer, provenance-bearing ZIP export, and renderer controls in concept details.
+- Snapshot-driven health and job-detail components with stale/unavailable states and redacted error display; no live health provider or worker is wired in.
 
 ## Install in Hermes Desktop on Windows
 
@@ -21,11 +23,11 @@ If your CLI does not list `plugins install`, check `hermes plugins --help` for t
 
 Start the loopback-only service from the repository root with `python3 -m pip install -r renderer/requirements.txt && python3 renderer/server.py` (Windows: `py -m pip install -r renderer\requirements.txt && py renderer\server.py`). Keep it running while using **Render slides**. It binds only to 127.0.0.1:8765; the plugin checks `/api/health` before rendering. The service accepts only the Electron file origin or loopback HTTP, binds to localhost, caps requests, and makes no outbound calls. Start it manually; the plugin never launches a background process.
 
-The renderer creates deterministic text-only 1080×1350 PNGs from ordered slide copy, previews the results, supports individual PNG downloads, and exports a ZIP with numbered PNGs and a JSON source manifest. The built-in neutral/ink templates are generic, not app-branded, and not an approved Cherry design. No remote or user assets are accessed. Copy/claim/asset review remains required before campaign use.
+The independently implemented renderer composites an explicitly supplied local image with ordered headline/body text, checks readable text bounds and supplied-image hashes, previews image-led PNGs, supports individual PNG downloads, and exports a ZIP with a JSON provenance manifest. It does not fetch remote assets or include the unlicensed/noncanonical reference repository's code, assets, campaign patterns, or writing. Rights and claim review remain required before external use.
 
 ## Local pipeline
 
-Open **Marketing → ＋ Fixture pipeline**. The entry creates a clearly marked fictional source (`fixture:focus-1`), an editable evidence-linked brief and untested hypothesis. **Generate static copy** creates four deterministic text slides locally; it uses no model or service. Edit slide text and move slides upward to change their order.
+Open **Marketing → ＋ Create pipeline concept**. It creates a generic, clearly marked illustrative concept, an editable brief and untested hypothesis in the normal workspace-card flow. **Generate static copy** creates four deterministic text slides locally; it uses no model or service. Edit slide text and move slides upward to change their order.
 
 **Save draft** persists the draft and appends a numbered snapshot containing its source, brief, hypothesis, slide order, and review statuses. Open **Saved versions** to inspect prior snapshots. Return to the overview and open the draft again to resume; unsaved edits are discarded only after confirmation.
 
@@ -47,7 +49,7 @@ git diff --check
 
 The pipeline test drives the registered UI through fixture creation, copy generation, edits, reordering, review gates, versioning, reopening, and discarding unsaved changes. It also checks all three plugin entry copies match. Python tests cover deterministic PNG output, ZIP provenance, HTTP render/export round trips, and rejection of remote origins.
 
-The smoke test exercises plugin registration, navigation, the overview metrics, three separate sample cards, and opening the corresponding detail view. It uses runtime stubs, so it does **not** replace verification in the actual Windows Desktop renderer.
+The smoke test exercises plugin registration, navigation, the overview metrics, three separate sample cards, and opening the corresponding detail view. The pipeline test also verifies concept creation into the card list, local edit/version/reopen, review gates, and a mocked render/export request. The Python renderer suite exercises real synthetic image composition and HTTP render/export round trips. These tests use stubs or synthetic fixtures and do **not** replace verification in the actual Windows Desktop renderer or provide a production worker, analytics source, source ingester, app profile, or publishing integration.
 
 ## Scope boundary
 
