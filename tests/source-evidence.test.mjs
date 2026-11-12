@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import sourceEvidence from '../src/domain/source-evidence.js';
+import sourceEvidence from '../src/domain/source-evidence.cjs';
 
 const { evaluateCreativeReadiness, validateEvidenceRecord } = sourceEvidence;
 

@@ -10,7 +10,6 @@ let hookIndex = 0
 const storage = new Map()
 const navigations = []
 const renderCalls = []
-const mockRenderSlideshow = async args => { renderCalls.push(args); return { dimensions: { width: 1080, height: 1350 }, slides: args.slides.map((_, i) => ({ index: i + 1, png: new Uint8Array([137,80,78,71]) })) } }
 const jsx = (type, props, key) => ({ type, props: props ?? {}, key })
 const Fragment = Symbol('Fragment')
 const react = {
@@ -25,7 +24,7 @@ const react = {
 const sdk = { Badge: 'Badge', Button: 'Button', EmptyState: 'EmptyState', ErrorState: 'ErrorState', Skeleton: 'Skeleton', ROUTES_AREA: 'routes', SIDEBAR_NAV_AREA: 'sidebar.nav', PALETTE_AREA: 'commandPalette', host: { navigate: route => navigations.push(route) }, useEffect: (...args) => react.useEffect(...args), useState: (...args) => react.useState(...args), useRef: (...args) => react.useRef(...args) }
 const registrations = []
 const ctx = { storage: { get: (key, fallback) => storage.has(key) ? storage.get(key) : fallback, set: (key, value) => storage.set(key, value), remove: key => storage.delete(key) }, register: item => registrations.push(item) }
-const context = vm.createContext({ AbortController, Uint8Array, fetch: async (url, options) => { renderCalls.push(url); return { ok: true, text: async () => 'OK', json: async () => ({ dimensions: { width: 1080, height: 1350 }, slides: [{ index: 1, pngBase64: 'iVBORw==' }], zipBase64: 'UEsDBA==' }) } }, require(name) { if (name === '@hermes/plugin-sdk') return sdk; if (name === 'react') return react; if (name === 'react/jsx-runtime') return { Fragment, jsx, jsxs: jsx }; throw new Error(`Unexpected import ${name}`) }, window: { confirm: () => true, addEventListener() {}, removeEventListener() {} }, btoa: value => Buffer.from(value, 'binary').toString('base64'), atob: value => Buffer.from(value, 'base64').toString('binary'), Date, setTimeout, clearTimeout })
+const context = vm.createContext({ AbortController, Uint8Array, fetch: async (url, options) => { renderCalls.push(url); return { ok: true, text: async () => 'OK', json: async () => url.endsWith('/render') ? ({ dimensions: { width: 1080, height: 1350 }, slides: [{ index: 1, pngBase64: 'iVBORw==' }] }) : ({ zipBase64: 'UEsDBA==' }) } }, require(name) { if (name === '@hermes/plugin-sdk') return sdk; if (name === 'react') return react; if (name === 'react/jsx-runtime') return { Fragment, jsx, jsxs: jsx }; throw new Error(`Unexpected import ${name}`) }, window: { confirm: () => true, addEventListener() {}, removeEventListener() {} }, btoa: value => Buffer.from(value, 'binary').toString('base64'), atob: value => Buffer.from(value, 'base64').toString('binary'), Date, setTimeout, clearTimeout })
 vm.runInContext(code.replace('export default {', 'globalThis.plugin = {'), context)
 const plugin = context.plugin
 assert.equal(plugin.id, 'marketing-system')
@@ -40,9 +39,19 @@ const nodes = node => !node || typeof node !== 'object' ? [] : [node, ...[node.p
 const find = label => nodes(render()).find(n => n.props?.['aria-label'] === label || n.props?.children === label)
 const click = label => { const n = find(label); assert.ok(n, `Missing UI: ${label}`); assert.ok(!n.props.disabled, `${label} disabled`); n.props.onClick() }
 const edit = (label, value) => { const n = find(label); assert.ok(n, `Missing field: ${label}`); n.props.onChange({ target: { value } }) }
-click('＋ Fixture pipeline')
-assert.match(JSON.stringify(render()), /Fictional fixture/)
-assert.match(JSON.stringify(render()), /fixture:focus-1/)
+assert.equal(source.includes("button('＋ Fixture pipeline'"), false, 'detached fixture pipeline action is absent')
+state.set(2, [])
+click('＋ Create pipeline concept')
+assert.equal(storage.get('drafts').length, 1, 'pipeline action persists a workspace record')
+assert.equal(storage.get('drafts')[0].title, 'Next step · illustrative pipeline concept')
+assert.equal(storage.get('drafts')[0].app, 'App A')
+state.set(1, null)
+state.set(2, storage.get('drafts'))
+const pipelineCard = nodes(render()).find(n => n.props?.['aria-label'] === 'Open App A slideshow: Next step · illustrative pipeline concept')
+assert.ok(pipelineCard, 'pipeline concept is available as a card in the main app workspace')
+pipelineCard.props.onClick()
+assert.match(JSON.stringify(render()), /Fictional illustration, not app evidence or measured effectiveness/)
+assert.match(JSON.stringify(render()), /No platform or attribution data connected\. Outcome is unavailable—not zero/)
 edit('Hypothesis', 'A clear next step may help readers understand the fictional app.')
 click('Generate static copy')
 edit('Slide 1', 'Edited opening')
@@ -52,7 +61,7 @@ let saved = storage.get('drafts')[0]
 assert.equal(saved.slides[1], 'Edited opening')
 click('Render slides')
 await new Promise(resolve => setTimeout(resolve, 20))
-assert.equal(renderCalls.length, 1)
+assert.equal(renderCalls.filter(url => String(url).endsWith('/render')).length, 1)
 assert.ok(renderCalls.some(url => String(url).endsWith('/api/render')))
 assert.match(JSON.stringify(render()), /Rendered preview/)
 assert.match(JSON.stringify(render()), /Download slide 1 PNG/)
