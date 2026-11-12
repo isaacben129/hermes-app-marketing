@@ -1,0 +1,17 @@
+{
+  "name": "app-marketing-ledger",
+  "version": "1.0.0",
+  "description": "App-agnostic marketing system with durable local event ledger and safe job scheduler",
+  "main": "plugin.js",
+  "type": "module",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "node --test tests/**/*.test.mjs"
+  },
+  "keywords": [],
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}
