@@ -1,12 +1,17 @@
 import base64
+import hashlib
 import io
 import json
+import os
+import re
 import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from render import render_slideshow
 
-MAX_REQUEST_BYTES = 1_000_000
-MAX_RESPONSE_BYTES = 8_000_000
+MAX_REQUEST_BYTES = 64_000_000
+MAX_RESPONSE_BYTES = 64_000_000
+IMAGE_CACHE = Path(os.environ.get('HERMES_MARKETING_RENDER_CACHE', Path(__file__).resolve().parent.parent / 'data' / 'render-cache')).resolve()
 
 class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -25,10 +30,45 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get('Transfer-Encoding'):
                 self.send_error(411); return
             size=int(self.headers.get('Content-Length','0'))
-            if size <= 0 or size > MAX_REQUEST_BYTES: raise ValueError('Request must be between 1 byte and 1 MB.')
+            if size <= 0 or size > MAX_REQUEST_BYTES: raise ValueError('Request must be between 1 byte and 64 MB.')
             payload=json.loads(self.rfile.read(size))
             if self.path == '/api/render':
-                rendered=render_slideshow(payload)
+                normalized = dict(payload)
+                normalized['slides'] = []
+                for number, original in enumerate(payload.get('slides') or [], 1):
+                    slide = dict(original)
+                    if 'image_data_url' in slide:
+                        encoded = slide.pop('image_data_url')
+                        if not isinstance(encoded, str) or len(encoded) > 17 * 1024 * 1024:
+                            raise ValueError(f'Slide {number} selected image exceeds the 12 MB limit.')
+                        match = re.fullmatch(r'data:image/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)', encoded)
+                        if not match:
+                            raise ValueError(f'Slide {number} selected image must be PNG, JPEG, or WebP data.')
+                        raw = base64.b64decode(match.group(2), validate=True)
+                        if len(raw) > 12 * 1024 * 1024:
+                            raise ValueError(f'Slide {number} selected image exceeds the 12 MB limit.')
+                        digest = hashlib.sha256(raw).hexdigest()
+                        expected = slide.get('image_sha256')
+                        if expected and expected != digest:
+                            raise ValueError(f'Slide {number} image SHA-256 does not match selected data.')
+                        IMAGE_CACHE.mkdir(parents=True, exist_ok=True)
+                        ext = {'png': 'png', 'jpeg': 'jpg', 'webp': 'webp'}[match.group(1)]
+                        destination = (IMAGE_CACHE / f'{digest}.{ext}').resolve()
+                        if destination.parent != IMAGE_CACHE:
+                            raise ValueError('Invalid selected image cache path.')
+                        if not destination.exists():
+                            destination.write_bytes(raw)
+                        slide['image_path'] = str(destination)
+                        slide['image_sha256'] = digest
+                    else:
+                        image_path = Path(str(slide.get('image_path', ''))).resolve()
+                        if not image_path.is_relative_to(IMAGE_CACHE):
+                            raise ValueError(f'Slide {number} image_path must be inside the local renderer image cache.')
+                        if not image_path.is_file():
+                            raise ValueError(f'Slide {number} image was not staged in the local renderer cache.')
+                        slide['image_path'] = str(image_path)
+                    normalized['slides'].append(slide)
+                rendered=render_slideshow(normalized)
                 result={'dimensions':rendered['dimensions'],'slides':[{'index':s['index'],'width':s['width'],'height':s['height'],'pngBase64':base64.b64encode(s['png']).decode('ascii'),'source_ref':s.get('source_ref'),'image_sha256':s.get('image_sha256')} for s in rendered['slides']]}
                 body=json.dumps(result).encode()
             else:
