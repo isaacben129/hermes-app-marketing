@@ -1,4 +1,90 @@
 import http from 'node:http'
-const LIMIT=2*1024*1024
-function fail(res,status,code,message,retryable=false){res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify({error:{code,message,retryable}}))}
-export function createService({actions,token,allowedOrigin}){if(!actions||typeof token!=='string'||!token)throw new TypeError('actions and token required');let rendering=false;return http.createServer(async(req,res)=>{const host=req.headers.host;if(!host||!/^127\.0\.0\.1(?::\d+)?$/.test(host)){fail(res,403,'provider_denied','Host rejected');return}if(req.url==='/api/health'&&req.method==='GET'){try{res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(await actions.health()))}catch{fail(res,503,'unavailable','Service unavailable',true)}return}if(req.headers.origin!==allowedOrigin||req.headers.authorization!==`Bearer ${token}`){fail(res,req.headers.authorization===`Bearer ${token}`?403:401,'provider_denied','Request not authorized');return}let body={};if(['POST','PUT'].includes(req.method)){try{const len=Number(req.headers['content-length']??0);if(len>LIMIT){fail(res,413,'invalid_input','Request too large');return}let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>LIMIT){fail(res,413,'invalid_input','Request too large');return}}body=raw?JSON.parse(raw):{}}catch{fail(res,400,'invalid_input','Malformed request');return}}const send=async(fn,status=200)=>{try{const v=await fn();res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(v??{}))}catch(e){const code=e.code==='stale_revision'?'stale_revision':e.code==='persistence_failed'?'persistence_failed':'invalid_input';fail(res,code==='stale_revision'?409:code==='persistence_failed'?503:400,code,code==='stale_revision'?'Workspace revision is stale':'Request failed',code==='persistence_failed')}};const u=new URL(req.url,'http://127.0.0.1');if(req.method==='GET'&&u.pathname==='/api/workspace')return send(()=>actions.workspace(u.searchParams.get('app')));if(req.method==='PUT'&&u.pathname.startsWith('/api/drafts/'))return send(()=>actions.saveDraft({...body,draft:body.draft??{...body,id:decodeURIComponent(u.pathname.split('/').pop())}}));if(req.method==='POST'&&u.pathname==='/api/legacy-import')return send(()=>actions.importLegacy(body));if(req.method==='POST'&&u.pathname==='/api/render'){if(rendering)return fail(res,429,'rate_limited','Render already running',true);rendering=true;try{return await send(()=>actions.renderDraft(body),202)}finally{rendering=false}}if(req.method==='POST'&&u.pathname==='/api/export')return send(()=>actions.exportDraft(body));if(req.method==='GET'&&u.pathname==='/api/jobs')return send(()=>actions.jobs());if(req.method==='GET'&&u.pathname.startsWith('/api/jobs/'))return send(()=>actions.job(decodeURIComponent(u.pathname.split('/').pop())));if(req.method==='POST'&&u.pathname.endsWith('/retry'))return send(()=>actions.retry(decodeURIComponent(u.pathname.split('/').at(-2))),202);if(req.method==='POST'&&u.pathname==='/api/postiz/sync')return send(()=>actions.sync());if(req.method==='POST'&&u.pathname==='/api/outcomes/import')return send(()=>actions.importOutcomes(body));fail(res,404,'unavailable','Route not found')})}
+
+const MAX_BODY_BYTES = 64_000_000
+const retryableCodes = new Set(['unavailable', 'persistence_failed', 'render_failed', 'rate_limited', 'service_offline', 'protocol_mismatch'])
+
+function response(res, status, body, origin) {
+  const headers = { 'content-type': 'application/json; charset=utf-8' }
+  if (origin !== undefined) { headers['access-control-allow-origin'] = origin; headers.vary = 'Origin' }
+  res.writeHead(status, headers)
+  res.end(JSON.stringify(body))
+}
+
+function errorResponse(res, status, code, origin) {
+  response(res, status, { error: { code, message: 'Request could not be completed', retryable: retryableCodes.has(code) } }, origin)
+}
+
+function statusFor(error) {
+  return ({ invalid_input: 400, stale_revision: 409, persistence_failed: 503, unavailable: 503, service_offline: 503, protocol_mismatch: 503, render_failed: 502, rate_limited: 429 })[error.code] ?? 400
+}
+
+export function createService({ actions, token, allowedOrigin = 'null' }) {
+  if (!actions || typeof token !== 'string' || !token) throw new TypeError('actions and token required')
+  if (typeof allowedOrigin !== 'string' || !allowedOrigin) throw new TypeError('allowedOrigin must be an explicit origin string')
+  let rendering = false
+  return http.createServer(async (req, res) => {
+    const origin = req.headers.origin
+    const corsOrigin = origin === allowedOrigin ? allowedOrigin : undefined
+    const expectedHost = `127.0.0.1:${res.socket.localPort}`
+    if (req.headers.host !== expectedHost) { errorResponse(res, 403, 'provider_denied', corsOrigin); return }
+    if (req.method === 'OPTIONS') {
+      if (!corsOrigin) { errorResponse(res, 403, 'provider_denied'); return }
+      res.writeHead(204, { 'access-control-allow-origin': corsOrigin, vary: 'Origin', 'access-control-allow-methods': 'GET, PUT, POST, OPTIONS', 'access-control-allow-headers': 'Authorization, Content-Type', 'access-control-max-age': '600' })
+      res.end()
+      return
+    }
+    const url = new URL(req.url, 'http://127.0.0.1')
+    if (req.method === 'GET' && url.pathname === '/api/health') {
+      try {
+        const value = await actions.health()
+        response(res, 200, { version: value.version, observedAt: value.observedAt, services: value.services?.map(({ name, status, lastSuccess, error }) => ({ name, status, lastSuccess, error })) ?? [] }, corsOrigin)
+      } catch { errorResponse(res, 503, 'unavailable', corsOrigin) }
+      return
+    }
+    if (!corsOrigin) { errorResponse(res, 403, 'provider_denied'); return }
+    if (req.headers.authorization !== `Bearer ${token}`) { errorResponse(res, 401, 'provider_denied', corsOrigin); return }
+    let body = {}
+    if (['POST', 'PUT'].includes(req.method)) {
+      const declared = Number(req.headers['content-length'] ?? 0)
+      if (declared > MAX_BODY_BYTES) { errorResponse(res, 413, 'invalid_input', corsOrigin); req.resume(); return }
+      try {
+        const chunks = []
+        let size = 0
+        for await (const chunk of req) {
+          size += chunk.length
+          if (size > MAX_BODY_BYTES) { errorResponse(res, 413, 'invalid_input', corsOrigin); return }
+          chunks.push(chunk)
+        }
+        const raw = Buffer.concat(chunks).toString('utf8')
+        body = raw ? JSON.parse(raw) : {}
+      } catch { errorResponse(res, 400, 'invalid_input', corsOrigin); return }
+    }
+    const invoke = async (work, successStatus = 200) => {
+      try { response(res, successStatus, await work(), corsOrigin) }
+      catch (error) { errorResponse(res, statusFor(error), error.code ?? 'invalid_input', corsOrigin) }
+    }
+    const draftMatch = /^\/api\/drafts\/([^/]+)$/.exec(url.pathname)
+    const jobMatch = /^\/api\/jobs\/([^/]+)$/.exec(url.pathname)
+    const retryMatch = /^\/api\/jobs\/([^/]+)\/retry$/.exec(url.pathname)
+    if (req.method === 'GET' && url.pathname === '/api/workspace') return invoke(() => actions.workspace(url.searchParams.get('app')))
+    if (req.method === 'PUT' && draftMatch) {
+      let id
+      try { id = decodeURIComponent(draftMatch[1]) } catch { errorResponse(res, 400, 'invalid_input', corsOrigin); return }
+      if ((body.id && body.id !== id) || (body.draft?.id && body.draft.id !== id)) { errorResponse(res, 400, 'invalid_input', corsOrigin); return }
+      return invoke(() => actions.saveDraft({ ...body, draft: body.draft ?? { ...body, id } }))
+    }
+    if (req.method === 'POST' && url.pathname === '/api/legacy-import') return invoke(() => actions.importLegacy(body))
+    if (req.method === 'POST' && url.pathname === '/api/render') {
+      if (rendering) { errorResponse(res, 429, 'rate_limited', corsOrigin); return }
+      rendering = true
+      try { return await invoke(() => actions.renderDraft(body), 202) } finally { rendering = false }
+    }
+    if (req.method === 'POST' && url.pathname === '/api/export') return invoke(() => actions.exportDraft(body))
+    if (req.method === 'GET' && url.pathname === '/api/jobs') return invoke(() => actions.jobs())
+    if (req.method === 'GET' && jobMatch) return invoke(() => actions.job(decodeURIComponent(jobMatch[1])))
+    if (req.method === 'POST' && retryMatch) return invoke(() => actions.retry(decodeURIComponent(retryMatch[1])), 202)
+    if (req.method === 'POST' && url.pathname === '/api/postiz/sync') return invoke(() => actions.sync())
+    if (req.method === 'POST' && url.pathname === '/api/outcomes/import') return invoke(() => actions.importOutcomes(body))
+    errorResponse(res, 404, 'invalid_input', corsOrigin)
+  })
+}

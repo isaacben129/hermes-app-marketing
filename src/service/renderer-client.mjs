@@ -1,1 +1,22 @@
-export class RendererClient { constructor({origin='http://127.0.0.1:8765',fetchImpl=fetch,timeoutMs=30000}={}){this.origin=origin;this.fetch=fetchImpl;this.timeoutMs=timeoutMs} async health(){const r=await this.fetch(`${this.origin}/api/health`,{signal:AbortSignal.timeout(this.timeoutMs)});if(!r.ok)throw new Error('Renderer unavailable');const v=await r.json();if(v.protocol!==2)throw Object.assign(new Error('Renderer protocol mismatch'),{code:'protocol_mismatch'});return v} async render(payload){await this.health();const r=await this.fetch(`${this.origin}/api/render`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(this.timeoutMs)});if(!r.ok)throw new Error('Renderer failed');return r.json()} }
+export class RendererClient {
+  constructor({ origin = 'http://127.0.0.1:8765', fetchImpl = fetch, timeoutMs = 30000 } = {}) {
+    this.origin = origin
+    this.fetch = fetchImpl
+    this.timeoutMs = timeoutMs
+  }
+  async health() {
+    const response = await this.fetch(`${this.origin}/api/health`, { signal: AbortSignal.timeout(this.timeoutMs) })
+    if (!response.ok) throw Object.assign(new Error('Renderer unavailable'), { code: 'unavailable' })
+    const value = await response.json()
+    if (value.protocol !== 2) throw Object.assign(new Error('Renderer protocol mismatch'), { code: 'protocol_mismatch' })
+    return value
+  }
+  async #post(route, payload) {
+    await this.health()
+    const response = await this.fetch(`${this.origin}${route}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(this.timeoutMs) })
+    if (!response.ok) throw Object.assign(new Error('Renderer request failed'), { code: response.status === 400 ? 'invalid_input' : 'render_failed' })
+    return response.json()
+  }
+  render(payload) { return this.#post('/api/render', payload) }
+  export(payload) { return this.#post('/api/export', payload) }
+}
