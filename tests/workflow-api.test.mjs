@@ -80,18 +80,24 @@ test('seven valid reviews survive reload and repeated review, while content edit
   const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nXcAAAAASUVORK5CYII='
   const bytes = Buffer.from(png, 'base64')
   const sha256 = (await import('node:crypto')).createHash('sha256').update(bytes).digest('hex')
-  let saved = await call('/api/drafts/d1', 'PUT', { expectedRevision: 1, draft: { id: 'd1', app: 'Cherry', slides: [{ selectedImage: { dataUrl: `data:image/png;base64,${png}`, sha256, sourceRef: 'local:image' } }], evidence, claims: [], qualityReviews } })
+  const draft = { id: 'd1', app: 'Cherry', slides: [{ selectedImage: { dataUrl: `data:image/png;base64,${png}`, sha256, sourceRef: 'local:image' } }], evidence, claims: [], qualityReviews: qualityReviews.map(review => ({ ...review, evidenceRefs: ['fabricated-pointer'] })) }
+  let saved = await call('/api/drafts/d1', 'PUT', { expectedRevision: 1, draft })
   assert.equal(saved.status, 200, JSON.stringify(saved.body))
   let reviewed = await call('/api/review', 'POST', { draftId: 'd1', revision: 2 })
+  assert.equal(reviewed.body.quality.assessment, 'inconclusive')
+  let state = (await call('/api/workspace?app=Cherry')).body
+  saved = await call('/api/drafts/d1', 'PUT', { expectedRevision: 3, draft: { ...state.drafts[0], qualityReviews } })
+  assert.equal(saved.status, 200)
+  reviewed = await call('/api/review', 'POST', { draftId: 'd1', revision: 4 })
   assert.equal(reviewed.body.quality.assessment, 'reviewed')
   assert.equal(reviewed.body.quality.dimensions.length, 7)
-  reviewed = await call('/api/review', 'POST', { draftId: 'd1', revision: 3 })
+  reviewed = await call('/api/review', 'POST', { draftId: 'd1', revision: 5 })
   assert.equal(reviewed.body.quality.assessment, 'reviewed')
-  assert.equal(reviewed.body.quality.revision, 2)
-  const state = (await call('/api/workspace?app=Cherry')).body
-  saved = await call('/api/drafts/d1', 'PUT', { expectedRevision: 4, draft: { ...state.drafts[0], title: 'Changed' } })
+  assert.equal(reviewed.body.quality.revision, 4)
+  state = (await call('/api/workspace?app=Cherry')).body
+  saved = await call('/api/drafts/d1', 'PUT', { expectedRevision: 6, draft: { ...state.drafts[0], title: 'Changed' } })
   assert.equal(saved.status, 200)
-  const afterEdit = await call('/api/review', 'POST', { draftId: 'd1', revision: 5 })
+  const afterEdit = await call('/api/review', 'POST', { draftId: 'd1', revision: 7 })
   assert.equal(afterEdit.body.quality.assessment, 'inconclusive')
 })
 
