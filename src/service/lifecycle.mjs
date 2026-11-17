@@ -10,6 +10,7 @@ import { LocalJobRunner } from '../jobs/runner.mjs'
 import { RendererClient } from './renderer-client.mjs'
 import { RenderArtifacts } from './artifacts.mjs'
 import { createActions } from './actions.mjs'
+import { createDefaultPostizReader } from '../integrations/postiz.mjs'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const handlerScript = `from http.server import HTTPServer\nfrom server import Handler\nHTTPServer(('127.0.0.1', int(__import__('sys').argv[1])), Handler).serve_forever()`
@@ -43,7 +44,9 @@ export async function startLocal({ dataDir = process.env.HERMES_MARKETING_DATA_D
   const runner = new LocalJobRunner({ ledger })
   await runner.restore()
   const artifacts = new RenderArtifacts({ dataDir })
-  const actions = createActions({ workspace, ledger, runner, renderer, artifacts })
+  let postizReader = null
+  try { postizReader = createDefaultPostizReader() } catch { /* invalid provider configuration remains unavailable */ }
+  const actions = createActions({ workspace, ledger, runner, renderer, artifacts, postizReader })
   const server = createService({ actions, token, allowedOrigin })
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(servicePort, '127.0.0.1', resolve) }) }
   catch (error) { if (child) await stopChild(child); throw error }

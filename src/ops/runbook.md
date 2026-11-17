@@ -1,11 +1,13 @@
-# Operations runbook
+# Local marketing service operations
 
-## System health and job detail
+## Start and connect
 
-The health view consumes an explicit snapshot supplied by its caller. It does not probe services or imply that the prototype has production telemetry. `observedAt` (or `timestamp`) is the snapshot observation time; the default freshness threshold is five minutes and callers may provide `now` and `staleAfterMs` for deterministic evaluation. Missing snapshots are unavailable; missing or over-age timestamps are stale. Unknown service statuses degrade the overall state instead of appearing healthy.
+Run `scripts/start-local.mjs` with an absolute `HERMES_MARKETING_DATA_DIR`. The service binds to loopback and writes a private `connection.json` containing its local URL and bearer token. The token is not returned by API responses. Delete the local connection file by stopping the service normally.
 
-Metrics are caller-provided values. A missing, null, or non-finite metric is shown as `Unavailable`, never as zero. Empty metrics and service lists are described as unavailable. Retry, pause, and resume buttons are disabled without callbacks and do nothing until clicked; supplied callbacks run only on the click, with the job ID passed by job detail actions. This UI does not make provider calls or send alerts.
+Postiz remains disconnected until an operator configures `POSTIZ_BASE_URL` (ending in `/api/public/v1` or the official `https://api.postiz.com/public/v1`, HTTPS required except loopback) and `POSTIZ_API_KEY`, then sends an authenticated `POST /api/postiz/sync` request with an app name, ISO date window, and 1–365 day metric lookback. Only GET routes documented in [Postiz capabilities](../../docs/postiz-capabilities.md) are used. Never put provider credentials in plugin storage, request bodies, source references, or exported artifacts.
 
-Job detail takes an explicit job record and displays its supplied identity, status, creation time, and event chronology ordered by timestamp (stable for equal or absent timestamps). Error text is redacted for bearer credentials and common `api_key`, token, password, and secret assignments before display. Supply only the minimum diagnostic detail appropriate to the operator; redaction is defense in depth, not a license to pass secrets.
+## Safe recovery
 
-No production worker, queue, service-health provider, or live metric source is implemented here. Integrate a real snapshot producer and explicit action handlers before treating the view as operational. Until then use the unavailable state; do not fabricate snapshots or health values.
+A failed local render job can be retried through the protected retry route. A stale workspace revision returns `409 stale_revision`; reload the app workspace before retrying a write. Persistence or renderer failures return safe error codes without returning success-shaped records. Job details are reconstructed from durable lifecycle events.
+
+Postiz authorization, rate-limit, timeout, and invalid response failures produce an unavailable sync result. Previously successful Postiz data remains available only as explicitly stale data. Do not interpret platform analytics as attributed business outcomes. Import owner-approved aggregate rows only after the app profile has approved event definitions and privacy settings.

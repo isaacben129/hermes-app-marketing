@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 
-const empty = () => ({ revision: 0, profiles: [], drafts: [], observations: [], decisions: [] })
+const empty = () => ({ revision: 0, profiles: [], drafts: [], observations: [], decisions: [], posts: [] })
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex')
 const imageData = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
@@ -13,13 +13,24 @@ export class WorkspaceStore {
   #queue = Promise.resolve()
   constructor({ ledger }) { if (!ledger) throw new TypeError('ledger is required'); this.#ledger = ledger }
 
-  async #normalizeDraft(input) {
+  async #normalizeDraft(input, existing = null) {
     const draft = structuredClone(input)
+    for (const key of ['quality', 'readiness', 'review', 'approved', 'approval']) delete draft[key]
     if (!safeId(draft.id)) throw new TypeError('Invalid draft id')
     const images = []
     for (const slide of draft.slides ?? []) {
       const image = slide.selectedImage
       if (!image) continue
+      if (image.dataUrl === undefined && typeof image.contentRef === 'string' && /^image:[a-f\d]{64}$/.test(image.contentRef)) {
+        const digest = image.contentRef.slice(6)
+        if (image.sha256 !== digest) throw new TypeError('Selected image reference hash mismatch')
+        const priorImages = (existing?.slides ?? []).map(item => item.selectedImage).filter(Boolean)
+        if (!priorImages.some(prior => prior.contentRef === image.contentRef && prior.sha256 === image.sha256 && prior.sourceRef === image.sourceRef)) throw new TypeError('Selected image reference is not owned by this saved draft')
+        const bytes = await fs.readFile(path.join(this.#ledger.baseDir, 'images', digest))
+        if (hash(bytes) !== digest) throw new Error('Stored image integrity check failed')
+        images.push({ digest, type: image.mimeType?.replace('image/', '') ?? 'png' })
+        continue
+      }
       if (typeof image.dataUrl !== 'string') throw new TypeError('Selected image data is required')
       const match = imageData.exec(image.dataUrl)
       if (!match) throw new TypeError('Invalid selected image data')
@@ -41,6 +52,16 @@ export class WorkspaceStore {
       images.push({ digest, type: match[1] })
     }
     return draft
+  }
+
+  async storeGeneratedImage(bytes, digest) {
+    if (!Buffer.isBuffer(bytes) || !/^[a-f\d]{64}$/.test(digest) || hash(bytes) !== digest) throw new TypeError('Generated image hash mismatch')
+    const dir = path.join(this.#ledger.baseDir, 'images')
+    await fs.mkdir(dir, { recursive: true, mode: 0o700 })
+    const file = path.join(dir, digest)
+    try { await fs.writeFile(file, bytes, { flag: 'wx', mode: 0o600 }) }
+    catch (error) { if (error.code !== 'EEXIST') throw error; if (hash(await fs.readFile(file)) !== digest) throw new Error('Stored image integrity check failed') }
+    return `image:${digest}`
   }
 
   async #readDraft(draft) {
@@ -66,6 +87,30 @@ export class WorkspaceStore {
         const draft = await this.#readDraft(p.draft)
         if (index < 0) state.drafts.push(draft); else state.drafts[index] = draft
       }
+      if (event.type === 'draft.deleted' && p.app === app) {
+        state.revision++
+        state.drafts = state.drafts.filter(draft => draft.id !== p.draftId)
+      }
+      if (p.app === app && ['profile.saved', 'review.completed', 'generation.intake', 'experiment.recommended', 'observations.imported', 'postiz.synced', 'postiz.sync_failed'].includes(event.type)) {
+        state.revision++
+        if (event.type === 'profile.saved') state.profiles = [p.profile]
+        if (event.type === 'review.completed') state.drafts = state.drafts.map(draft => draft.id === p.draftId && hash(JSON.stringify(draft)) === p.contentHash ? { ...draft, quality: p.quality, readiness: p.readiness } : draft)
+        if (event.type === 'generation.intake') state.drafts = state.drafts.map(draft => draft.id === p.draftId ? { ...draft, generatedAssets: [...(draft.generatedAssets ?? []), p.asset] } : draft)
+        if (event.type === 'experiment.recommended') state.decisions.push(p.decision)
+        if (event.type === 'observations.imported') state.observations.push(...p.observations)
+        if (event.type === 'postiz.synced') {
+          const byId = new Map(state.posts.map(post => [post.id, post]))
+          for (const post of p.posts ?? []) byId.set(post.id, post)
+          state.posts = [...byId.values()]
+          const byEvidence = new Map(state.observations.map(item => [item.evidenceId, item]))
+          for (const item of p.observations ?? []) byEvidence.set(item.evidenceId, item)
+          state.observations = [...byEvidence.values()]
+        }
+        if (event.type === 'postiz.sync_failed') {
+          state.posts = state.posts.map(post => ({ ...post, freshness: 'stale' }))
+          state.observations = state.observations.map(item => item.source === 'postiz' ? { ...item, status: 'stale' } : item)
+        }
+      }
       if (event.type === 'workspace.imported' && p.migrationId && !migrations.has(p.migrationId)) {
         migrations.add(p.migrationId)
         const part = p.workspace?.[app]
@@ -90,6 +135,7 @@ export class WorkspaceStore {
       const p = event.payload ?? {}
       if (event.type === 'draft.saved' && p.draft?.id) found.set(p.draft.id, p.draft)
       if (event.type === 'workspace.imported') for (const part of Object.values(p.workspace ?? {})) for (const draft of part.drafts ?? []) found.set(draft.id, draft)
+      if (event.type === 'draft.deleted') found.delete(p.draftId)
     }
     const draft = found.get(id)
     return draft ? this.#readDraft(draft) : null
@@ -119,11 +165,33 @@ export class WorkspaceStore {
       const existing = await this.findDraft(draft.id)
       if (existing && existing.app !== draft.app) throw Object.assign(new TypeError('Draft ID belongs to another app'), { code: 'invalid_input' })
       if (current.revision !== expectedRevision) throw Object.assign(new Error('Workspace revision is stale'), { code: 'stale_revision' })
-      const normalized = await this.#normalizeDraft(draft)
+      const normalized = await this.#normalizeDraft(draft, existing)
       const contentHash = hash(JSON.stringify(normalized))
       try { await this.#ledger.appendEvent({ type: 'draft.saved', payload: { draft: normalized, parentRevision: current.revision, contentHash } }) }
       catch (error) { throw Object.assign(new Error('Workspace persistence failed'), { code: 'persistence_failed', cause: error }) }
       return { revision: current.revision + 1, draft: await this.#readDraft(normalized) }
+    }))
+  }
+
+  record({ type, app, payload, expectedRevision }) {
+    return this.#serialize(() => this.#withLock(async () => {
+      if (typeof app !== 'string' || !app.trim() || typeof type !== 'string' || !type || !payload || typeof payload !== 'object' || Array.isArray(payload)) throw new TypeError('Invalid workspace record')
+      const current = await this.load(app)
+      if (current.revision !== expectedRevision) throw Object.assign(new Error('Workspace revision is stale'), { code: 'stale_revision' })
+      try { await this.#ledger.appendEvent({ type, payload: { ...payload, app, parentRevision: current.revision } }) }
+      catch (error) { throw Object.assign(new Error('Workspace persistence failed'), { code: 'persistence_failed', cause: error }) }
+      return current.revision + 1
+    }))
+  }
+
+  deleteDraft({ draftId, app, expectedRevision }) {
+    return this.#serialize(() => this.#withLock(async () => {
+      const current = await this.load(app)
+      const draft = await this.findDraft(draftId)
+      if (!draft || draft.app !== app) throw Object.assign(new Error('Draft missing'), { code: 'invalid_input' })
+      if (current.revision !== expectedRevision) throw Object.assign(new Error('Workspace revision is stale'), { code: 'stale_revision' })
+      await this.#ledger.appendEvent({ type: 'draft.deleted', payload: { app, draftId, parentRevision: current.revision } })
+      return current.revision + 1
     }))
   }
 
