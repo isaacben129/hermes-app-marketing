@@ -3,16 +3,18 @@ export function recommendExperiment({ experiment, observations, now }) {
   if (!experiment || typeof experiment !== 'object' || !Array.isArray(observations) || !validDate(now)) return inconclusive('invalid_input');
   const policy = experiment.policy;
   if (!policy || policy.approved !== true || !text(policy.version) || !finite(policy.killBelow) || !finite(policy.keepAtOrAbove) || policy.killBelow < 0 || policy.keepAtOrAbove > 1 || policy.killBelow > policy.keepAtOrAbove) return inconclusive('policy_unconfigured');
-  if (!text(experiment.appId) || !text(experiment.changedVariable) || !text(experiment.baseline) || !text(experiment.variant) || experiment.baseline === experiment.variant || !text(experiment.primaryMetric) || !Number.isSafeInteger(experiment.minExposure) || experiment.minExposure < 0 || !finite(experiment.minOutcomeCoverage) || experiment.minOutcomeCoverage < 0 || experiment.minOutcomeCoverage > 1) return inconclusive('invalid_experiment');
+  if (!text(experiment.appId) || !text(experiment.changedVariable) || !text(experiment.baseline) || !text(experiment.variant) || experiment.baseline === experiment.variant || !text(experiment.primaryMetric) || !Number.isSafeInteger(experiment.minExposure) || experiment.minExposure <= 0 || !finite(experiment.minOutcomeCoverage) || experiment.minOutcomeCoverage < 0 || experiment.minOutcomeCoverage > 1) return inconclusive('invalid_experiment');
   let window;
   try { window = dateWindow(experiment.window); } catch { return inconclusive('invalid_window'); }
   const allIds = observations.map(o => o?.evidenceId).filter(text);
   if (now.slice(0, 10) <= window.end) return inconclusive('window_immature', allIds);
   if (!Number.isFinite(policy.maxSourceAgeMs) || policy.maxSourceAgeMs < 0) return inconclusive('policy_unconfigured', allIds);
-  const relevant = observations.filter(o => o?.metric === undefined || o.metric === experiment.primaryMetric);
-  if (!relevant.length || relevant.some(o => !o || o.windowStart !== window.start || o.windowEnd !== window.end)) return inconclusive('missing_attribution_or_window_mismatch', allIds);
-  if (relevant.some(o => !validDate(o.observedAt) || Date.parse(now) - Date.parse(o.observedAt) > policy.maxSourceAgeMs)) return inconclusive('stale_source', allIds);
-  if (relevant.some(o => !Number.isSafeInteger(o.exposure) || o.exposure < 0 || !Number.isSafeInteger(o.outcome) || o.outcome < 0 || !finite(o.coverage) || o.coverage < 0 || o.coverage > 1)) return inconclusive('invalid_observation', allIds);
+  const relevant = observations;
+  if (!relevant.length || relevant.some(o => !o || o.appId !== experiment.appId || o.metric !== experiment.primaryMetric || o.status !== 'available' || o.fixtureOnly !== false || o.attributionVerified !== true || !text(o.evidenceId) || !text(o.source) || o.windowStart !== window.start || o.windowEnd !== window.end)) return inconclusive('missing_attribution_or_window_mismatch', allIds);
+  if (new Set(relevant.map(o => o.evidenceId)).size !== relevant.length) return inconclusive('duplicate_evidence', allIds);
+  if (relevant.some(o => !validDate(o.observedAt) || Date.parse(o.observedAt) > Date.parse(now) || Date.parse(now) - Date.parse(o.observedAt) > policy.maxSourceAgeMs)) return inconclusive('stale_source', allIds);
+  if (relevant.some(o => !Number.isSafeInteger(o.exposure) || o.exposure <= 0 || !Number.isSafeInteger(o.outcome) || o.outcome < 0 || o.outcome > o.exposure || !finite(o.coverage) || o.coverage < 0 || o.coverage > 1)) return inconclusive('invalid_observation', allIds);
+  if (relevant.filter(o => o.cell === experiment.baseline).length !== 1 || relevant.filter(o => o.cell === experiment.variant).length !== 1 || relevant.some(o => ![experiment.baseline, experiment.variant].includes(o.cell))) return inconclusive('ambiguous_cells', allIds);
   const byCell = new Map(relevant.map(o => [o.cell, o]));
   const baseline = byCell.get(experiment.baseline), variant = byCell.get(experiment.variant);
   if (!baseline || !variant) return inconclusive('missing_attribution', allIds);
@@ -27,9 +29,13 @@ export function recommendExperiment({ experiment, observations, now }) {
 
 const text = v => typeof v === 'string' && v.trim().length > 0;
 const finite = v => typeof v === 'number' && Number.isFinite(v);
-const validDate = v => typeof v === 'string' && Number.isFinite(Date.parse(v));
+const validDate = v => typeof v === 'string' && validCalendarDate(v) && Number.isFinite(Date.parse(v));
+const validCalendarDate = v => {
+  const match = /^(\d{4}-\d{2}-\d{2})(?:T.*)?$/.exec(v);
+  return Boolean(match && dateOnly(match[1]));
+};
 function dateWindow(w) {
   if (!w || !dateOnly(w.start) || !dateOnly(w.end) || w.start > w.end) throw new TypeError('invalid window');
   return { start: w.start, end: w.end };
 }
-const dateOnly = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+const dateOnly = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && Number.isFinite(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
