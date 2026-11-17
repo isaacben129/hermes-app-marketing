@@ -10,7 +10,11 @@ import { LocalJobRunner } from '../src/jobs/runner.mjs'
 import { createActions } from '../src/service/actions.mjs'
 import { createService } from '../src/service/server.mjs'
 
-const approvedProfile = (app = 'Cherry') => ({ ...structuredClone(cherry), name: app, appId: app.toLowerCase(), configuration: { ...cherry.configuration, qualifiedEvent: approved('qualified_start'), paidEvent: approved('purchase'), privacyPolicy: approved('privacy-v1') } })
+const cherryProfile = () => {
+  const { status: _status, campaign: _campaign, measurement: _measurement, provisionalEventCandidates: _candidates, notes: _notes, ...profile } = structuredClone(cherry)
+  return profile
+}
+const approvedProfile = (app = 'Cherry') => ({ ...cherryProfile(), name: app, appId: app.toLowerCase(), configuration: { ...cherry.configuration, qualifiedEvent: approved('qualified_start'), paidEvent: approved('purchase'), privacyPolicy: approved('privacy-v1') } })
 const approved = value => ({ value, status: 'approved', evidenceRef: 'owner:evidence', reviewer: 'owner', reviewedAt: '2026-11-17T00:00:00Z' })
 
 async function fixture(t, postizReader = null) {
