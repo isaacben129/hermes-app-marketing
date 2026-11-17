@@ -1,56 +1,26 @@
-# App Marketing System — Hermes Desktop plugin
+# App Marketing System · Hermes Desktop plugin
 
-A local-first, app-agnostic workspace prototype for managing slideshow concepts across fictional **App A**, **App B**, and **App C**. It is not Cherry-specific.
+The Marketing page is a service-backed workflow for app-scoped drafts, profile evidence, asset intake, creative review, rendering, exports, experiment decisions, and aggregate outcomes. It starts on Cherry and does not assume campaign facts, rights, approvals, or business metrics.
 
-## What this prototype includes
+## Local services
 
-- An overview that limits itself to business outcome measures. Since no analytics are connected, unavailable outcomes are shown as unavailable—not zero or fabricated performance.
-- Separate, tappable cards for each sample slideshow, with a detail/editor view.
-- Local draft persistence in Hermes plugin storage, plus a separate versioned record contract and durable local event/job ledger library.
-- Explicit fictional/sample labeling and evidence/rights readiness gates.
-- An independently implemented image-plus-text PNG renderer, provenance-bearing ZIP export, and renderer controls in concept details.
-- Snapshot-driven health and job-detail components with stale/unavailable states and redacted error display; no live health provider or worker is wired in.
+Start the marketing API at `http://127.0.0.1:8764` and configure its browser CORS allowlist for the origin that will host the UI. In the page's **AppSettings**, enter that loopback URL and a bearer token. The token is stored only in Hermes plugin storage on this device and is sent only as the service Authorization header. The UI asks the service for health and the protected Cherry workspace; drafts, profiles, and decisions are then read from the service.
 
-## Install in Hermes Desktop on Windows
+Use **Overview** to open a service draft, create a blank draft, inspect read-only outcomes, or request a read-only Postiz sync. In **Slideshows**, edit structured slides and evidence, save by expected revision, attach an operator supplied image, run service review, render the saved revision, select a thumbnail, and download the service ZIP artifact. The service owns validation, content references, review status, and durable revision changes. Unknown rights, unassessed quality, and missing evidence stay visibly blocked. No publish, schedule, or provider draft-write action is exposed.
 
-1. Download or clone this repository onto the Windows filesystem.
-2. Open a terminal and run `hermes plugins install <path-to-this-repository>` if your installed Hermes CLI supports local plugin installation; otherwise follow the Desktop plugin SDK's local development install instructions for your version.
-3. In Hermes Desktop, open the command palette and run **Reload desktop plugins**. Then open **Marketing** from the sidebar or use the **Open app marketing** command.
+The other views provide service health/job detail, aggregate outcome import, and an experiment recommendation form. An unconfigured policy yields an inconclusive service decision. No UI-side fallback fabricates posts or observations.
 
-If your CLI does not list `plugins install`, check `hermes plugins --help` for the supported package installation command. The package entry is `desktop/plugin.js`; its source is `plugin.js`.
+## Browser QA preview
 
-## Local slide renderer
+Run `npm ci`, then `npm run preview`. Visit [http://127.0.0.1:8766](http://127.0.0.1:8766) and allow that exact origin in the marketing service CORS configuration. This harness renders the same `src/desktop/entry.js` using a clearly labeled browser-only Hermes SDK shim and browser local storage. Its file picker uses browser permissions; it does not verify native Hermes host behavior. It loads only actual service data.
 
-Start the loopback-only service from the repository root with `python3 -m pip install -r renderer/requirements.txt && python3 renderer/server.py` (Windows: `py -m pip install -r renderer\requirements.txt && py renderer\server.py`). Keep it running while using **Render slides**. It binds only to 127.0.0.1:8765; the plugin checks `/api/health` before rendering. The service accepts only the Electron file origin or loopback HTTP, binds to localhost, caps requests, and makes no outbound calls. Start it manually; the plugin never launches a background process.
+Build the production plugin bundle and byte-identical mirrors with `npm run build`. The native bundle leaves React, JSX runtime, and `@hermes/plugin-sdk` external so the host supplies its own runtime.
 
-The independently implemented renderer composites an explicitly supplied local image with ordered headline/body text, checks readable text bounds and supplied-image hashes, previews image-led PNGs, supports individual PNG downloads, and exports a ZIP with a JSON provenance manifest. It does not fetch remote assets or include the unlicensed/noncanonical reference repository's code, assets, campaign patterns, or writing. Rights and claim review remain required before external use.
-
-## Local pipeline
-
-Open **Marketing → ＋ Create pipeline concept**. It creates a generic, clearly marked illustrative concept, an editable brief and untested hypothesis in the normal workspace-card flow. **Generate static copy** creates four deterministic text slides locally; it uses no model or service. Edit slide text and move slides upward to change their order.
-
-**Save draft** persists the draft and appends a numbered snapshot containing its source, brief, hypothesis, slide order, and review statuses. Open **Saved versions** to inspect prior snapshots. Return to the overview and open the draft again to resume; unsaved edits are discarded only after confirmation.
-
-Rights start **unknown**, claims **unreviewed**, and CTA **unchecked**. Local review readiness requires cleared rights, supported claims, a checked CTA and at least one slide. Unknown or restricted rights block readiness. Copy or brief changes invalidate claim and CTA checks. These statuses are human attestations, not automatic verification; readiness only changes local metadata and never sends anything for external review. Fixture context does not establish effectiveness or real product claims. No real metrics are recorded.
-
-Persistence uses only this plugin's storage when run by the user. Tests use an in-memory storage stub and do not write application data. There is no source fetching, integration, media generation, publishing, scheduling, or external review transport.
-
-## Verification (Node.js)
+## Verification
 
 ```sh
-node --check plugin.js
-node --check desktop/plugin.js
-node --check desktop-plugins/marketing-system/plugin.js
-node tests/plugin-smoke.mjs
-node tests/pipeline.mjs
-python3 -m unittest tests/test_renderer.py tests/test_export.py tests/test_server.py -v
-git diff --check
+npm test
+npm run build
 ```
 
-The pipeline test drives the registered UI through fixture creation, copy generation, edits, reordering, review gates, versioning, reopening, and discarding unsaved changes. It also checks all three plugin entry copies match. Python tests cover deterministic PNG output, ZIP provenance, HTTP render/export round trips, and rejection of remote origins.
-
-The smoke test exercises plugin registration, navigation, the overview metrics, three separate sample cards, and opening the corresponding detail view. The pipeline test also verifies concept creation into the card list, local edit/version/reopen, review gates, and a mocked render/export request. The Python renderer suite exercises real synthetic image composition and HTTP render/export round trips. These tests use stubs or synthetic fixtures and do **not** replace verification in the actual Windows Desktop renderer or provide a production worker, analytics source, source ingester, app profile, or publishing integration.
-
-## Scope boundary
-
-Prototype only: no real analytics, app accounts, external integrations, publishing/scheduling, generated media, spend, or real performance data.
+The registered React workflow tests cover connection/auth, service-owned records, revision checked save/readback, rendering by saved revision, offline error handling, and the no fabricated data state. Service integration still needs to be exercised against the combined API once its owner lands the referenced route contracts; unit interaction tests mock only the HTTP boundary.

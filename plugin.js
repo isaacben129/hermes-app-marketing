@@ -1,276 +1,557 @@
-import { Badge, Button, EmptyState, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, host } from '@hermes/plugin-sdk'
-import React, { useEffect, useState } from 'react'
-import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
+// src/desktop/entry.js
+import React3, { useEffect, useMemo, useState } from "react";
+import { jsx, jsxs, Fragment } from "react/jsx-runtime";
+import { Badge, Button, EmptyState, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, host } from "@hermes/plugin-sdk";
 
-const RENDERER_BASE = 'http://127.0.0.1:8765/api'
-const MAX_RENDER_REQUEST_BYTES = 64_000_000
-async function rendererPost(path, payload) {
-  const body = JSON.stringify(payload)
-  if (new TextEncoder().encode(body).byteLength > MAX_RENDER_REQUEST_BYTES) throw new Error('Renderer request exceeds the 64 MB limit.')
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 30000)
-  try {
-    const response = await fetch(`${RENDERER_BASE}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: controller.signal })
-    const data = await response.json()
-    if (!response.ok) throw new Error(data.error || 'Local renderer failed.')
-    return data
-  } finally { clearTimeout(timer) }
+// src/ui/SystemHealth.js
+import React from "react";
+
+// src/ops/health.js
+var KNOWN_STATES = /* @__PURE__ */ new Set(["healthy", "attention", "degraded"]);
+var DEFAULT_STALE_AFTER_MS = 5 * 60 * 1e3;
+function asTimestamp(value) {
+  const timestamp = typeof value === "number" ? value : Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
-async function assertRendererProtocol() {
-  const response = await fetch(`${RENDERER_BASE}/health`, { signal: AbortSignal.timeout(1000) })
-  if (!response.ok) throw new Error('Local renderer health check failed.')
-  const health = await response.json()
-  if (health?.service !== 'marketing-renderer' || health.protocol !== 2 || !Array.isArray(health.features) || !health.features.includes('image_data_url') || !health.features.includes('zip-export') || health.maxRequestBytes !== 64000000) throw new Error('Local renderer protocol mismatch; update the renderer before continuing.')
+function determineSystemHealth(snapshot, options = {}) {
+  if (!snapshot || !Array.isArray(snapshot.services)) {
+    return { status: "unavailable", label: "Unavailable", observedAt: null, services: [] };
+  }
+  const observedAt = snapshot.observedAt ?? snapshot.timestamp ?? null;
+  const observedMs = asTimestamp(observedAt);
+  const nowMs = asTimestamp(options.now ?? Date.now());
+  const staleAfterMs = Number.isFinite(options.staleAfterMs) ? options.staleAfterMs : DEFAULT_STALE_AFTER_MS;
+  if (observedMs === null || nowMs === null || nowMs - observedMs > staleAfterMs) {
+    return { status: "stale", label: "Stale", observedAt, services: snapshot.services };
+  }
+  const statuses = snapshot.services.map((service) => service?.status);
+  let status = "healthy";
+  if (statuses.some((value) => !KNOWN_STATES.has(value) || value === "degraded")) status = "degraded";
+  else if (statuses.some((value) => value === "attention")) status = "attention";
+  return { status, label: status[0].toUpperCase() + status.slice(1), observedAt, services: snapshot.services };
 }
-async function renderSlideshow(payload) {
-  await assertRendererProtocol()
-  const data = await rendererPost('render', payload)
-  return { ...data, slides: data.slides.map(slide => ({ ...slide, png: Uint8Array.from(atob(slide.pngBase64), c => c.charCodeAt(0)) })) }
+function formatMetric(value) {
+  if (value === null || value === void 0 || typeof value === "number" && !Number.isFinite(value)) return "Unavailable";
+  return String(value);
 }
-async function exportSlideshowZip(rendered, source = {}) {
-  if (!rendered?.slides?.length) throw new Error('Render slides before exporting.')
-  await assertRendererProtocol()
-  const data = await rendererPost('export', { rendered: { ...rendered, slides: rendered.slides.map(slide => ({ ...slide, pngBase64: pngBase64(slide) })) }, source })
-  return Uint8Array.from(atob(data.zipBase64), c => c.charCodeAt(0))
+function formatJobChronology(job) {
+  if (!job || !Array.isArray(job.events)) return [];
+  return job.events.map((event, index) => ({
+    ...event,
+    at: event?.at ?? event?.timestamp ?? null,
+    status: event?.status ?? "unknown",
+    message: redactError(event?.error ?? event?.message ?? "No details available."),
+    _index: index
+  })).sort((left, right) => {
+    const leftTime = asTimestamp(left.at) ?? Number.MAX_SAFE_INTEGER;
+    const rightTime = asTimestamp(right.at) ?? Number.MAX_SAFE_INTEGER;
+    return leftTime - rightTime || left._index - right._index;
+  }).map(({ _index, ...event }) => event);
 }
-function pngBase64(slide) {
-  if (typeof slide.pngBase64 === 'string') return slide.pngBase64
-  const bytes = slide.png
-  if (!(bytes instanceof Uint8Array)) throw new TypeError('Rendered PNG bytes are unavailable.')
-  let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
-  return btoa(binary)
+function redactError(error) {
+  if (error === null || error === void 0 || error === "") return "No details available.";
+  return String(error).replace(/\bBearer\s+[^\s,;]+/gi, "[REDACTED]").replace(/\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*[^\s,;]+/gi, (match) => `${match.split(/[:=]/, 1)[0]}=[REDACTED]`);
 }
 
-const ROUTE = '/marketing-system'
-const CHERRY_STARTER = {
-  id: 'brand-guide:cherry',
-  kind: 'Brand source',
-  evidence: 'Brand guide only. Product features, assets, claims, CTA, channels, and outcome data are not configured.'
+// src/ui/SystemHealth.js
+var h = (type, props, ...children) => React.createElement(type, props, ...children);
+var panel = { border: "1px solid var(--ui-stroke-secondary)", borderRadius: "var(--ui-radius-sm, 4px)", padding: "14px" };
+var muted = { color: "var(--ui-text-tertiary)", fontSize: "0.82rem" };
+function SystemHealth({ snapshot = null, metrics = {}, now, staleAfterMs, onRetry, onPause, onResume }) {
+  const health = determineSystemHealth(snapshot, { now, staleAfterMs });
+  const freshness = health.observedAt ? `Last checked ${String(health.observedAt)}` : "Freshness unavailable";
+  const services = health.services.map((service) => h(
+    "li",
+    {
+      key: service?.name ?? service?.id ?? service?.status,
+      style: { display: "flex", justifyContent: "space-between", gap: "12px", padding: "7px 0" }
+    },
+    h("span", null, service?.name ?? "Unnamed service"),
+    h("span", { "aria-label": "Service status" }, service?.status ?? "Unavailable")
+  ));
+  const metricNodes = Object.entries(metrics).map(([name, value]) => h(
+    "div",
+    {
+      key: name,
+      style: { ...panel, minWidth: "140px", flex: "1 1 140px" }
+    },
+    h("div", { style: muted }, name),
+    h("div", { style: { marginTop: "6px", fontSize: "1.2rem" } }, formatMetric(value))
+  ));
+  const action = (label, callback) => h("button", {
+    key: label,
+    type: "button",
+    disabled: typeof callback !== "function",
+    onClick: () => {
+      if (typeof callback === "function") callback();
+    }
+  }, label);
+  return h(
+    "section",
+    { "aria-label": "System health", style: { display: "grid", gap: "14px" } },
+    h(
+      "header",
+      { style: panel },
+      h("h2", { style: { margin: "0 0 5px" } }, "System health"),
+      h("div", { role: "status", "aria-live": "polite" }, health.label),
+      h("div", { style: muted }, freshness)
+    ),
+    h(
+      "section",
+      { "aria-label": "Services", style: panel },
+      h("h3", null, "Services"),
+      services.length ? h("ul", { style: { listStyle: "none", padding: 0, margin: 0 } }, ...services) : h("p", { style: muted }, "Service details unavailable.")
+    ),
+    h(
+      "section",
+      { "aria-label": "Metrics", style: { display: "flex", flexWrap: "wrap", gap: "9px" } },
+      metricNodes.length ? metricNodes : h("p", { style: muted }, "Metrics unavailable.")
+    ),
+    h(
+      "nav",
+      { "aria-label": "Health actions", style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
+      action("Retry", onRetry),
+      action("Pause", onPause),
+      action("Resume", onResume)
+    )
+  );
 }
-const cherryWorkspaceDraft = (id, title = 'Untitled Cherry workspace draft') => ({
-  id, app: 'Cherry', title, format: 'Draft · 0 slides', stage: 'Draft', hook: '', slides: [], isDraft: true,
-  source: { ...CHERRY_STARTER, evidence: 'Brand guide only; no product facts, claims, creative, or outcomes inferred.' },
-  brief: 'Practice social situations. Start small. Get better over time.', hypothesis: '', rights: 'unknown',
-  claim: 'unreviewed', cta: 'unconfigured', claimsApproval: 'unconfigured', channels: [], assets: [],
-  events: { status: 'unconfigured', privacy: 'unconfigured' }, review: 'blocked', versions: []
-})
-const BORDER = 'var(--ui-stroke-secondary)'
-const MUTED = { color: 'var(--ui-text-tertiary)' }
-const PANEL = { border: `1px solid ${BORDER}`, borderRadius: 'var(--ui-radius-sm, 4px)', background: 'color-mix(in srgb, var(--ui-text-secondary) 2%, transparent)' }
 
+// src/ui/JobDetail.js
+import React2 from "react";
+var h2 = (type, props, ...children) => React2.createElement(type, props, ...children);
+var panel2 = { border: "1px solid var(--ui-stroke-secondary)", borderRadius: "var(--ui-radius-sm, 4px)", padding: "14px" };
+var muted2 = { color: "var(--ui-text-tertiary)", fontSize: "0.82rem" };
+var text = (value) => value === null || value === void 0 || value === "" ? "Unavailable" : String(value);
+function JobDetail({ job = null, onRetry, onPause, onResume }) {
+  if (!job) {
+    return h2(
+      "section",
+      { "aria-label": "Job details", style: panel2 },
+      h2("h2", null, "Job details"),
+      h2("p", { role: "status", style: muted2 }, "Job details unavailable.")
+    );
+  }
+  const chronology = formatJobChronology(job);
+  const action = (label, callback) => h2("button", {
+    key: label,
+    type: "button",
+    disabled: typeof callback !== "function",
+    onClick: () => {
+      if (typeof callback === "function") callback(job.id);
+    }
+  }, label);
+  const events = chronology.length ? chronology.map((event, index) => h2(
+    "li",
+    {
+      key: `${event.at ?? "undated"}-${index}`,
+      style: { borderLeft: "2px solid var(--ui-stroke-secondary)", padding: "0 0 13px 12px", marginLeft: "5px" }
+    },
+    h2("time", { dateTime: event.at ?? void 0, style: muted2 }, text(event.at)),
+    h2("div", { style: { fontWeight: 600, marginTop: "3px" } }, text(event.status)),
+    h2("div", { style: muted2 }, redactError(event.error ?? event.message))
+  )) : [h2("li", { key: "empty", style: muted2 }, "Job chronology unavailable.")];
+  return h2(
+    "article",
+    { "aria-label": "Job details", style: { display: "grid", gap: "14px" } },
+    h2(
+      "header",
+      { style: panel2 },
+      h2("h2", { style: { margin: "0 0 8px" } }, "Job details"),
+      h2(
+        "dl",
+        { style: { display: "grid", gridTemplateColumns: "max-content 1fr", gap: "5px 12px", margin: 0 } },
+        h2("dt", { style: muted2 }, "Job ID"),
+        h2("dd", { style: { margin: 0 } }, text(job.id)),
+        h2("dt", { style: muted2 }, "Status"),
+        h2("dd", { style: { margin: 0 } }, text(job.status)),
+        h2("dt", { style: muted2 }, "Created"),
+        h2("dd", { style: { margin: 0 } }, text(job.createdAt ?? job.created_at))
+      ),
+      h2(
+        "nav",
+        { "aria-label": "Job actions", style: { display: "flex", gap: "8px", marginTop: "12px" } },
+        action("Retry", onRetry),
+        action("Pause", onPause),
+        action("Resume", onResume)
+      )
+    ),
+    h2(
+      "section",
+      { "aria-label": "Job chronology", style: panel2 },
+      h2("h3", null, "Chronology"),
+      h2("ol", { style: { listStyle: "none", padding: "8px 0 0", margin: 0 } }, ...events)
+    )
+  );
+}
+
+// src/desktop/entry.js
+var h3 = React3.createElement;
+var urlDefault = "http://127.0.0.1:8764";
+var ROUTE = "/marketing-system";
+var selectedImageData = /* @__PURE__ */ new Map();
+var panel3 = { border: "1px solid var(--ui-stroke-secondary)", borderRadius: "var(--ui-radius-sm, 4px)", padding: 14, display: "grid", gap: 10 };
+var labelStyle = { display: "grid", gap: 5, color: "var(--ui-text-secondary)", fontSize: ".82rem" };
+var fieldStyle = { padding: "9px 10px", color: "var(--ui-text-primary)", background: "transparent", border: "1px solid var(--ui-stroke-secondary)", borderRadius: 6, font: "inherit" };
+var json = async (response) => {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = typeof data.error === "object" ? data.error : {};
+    const code = detail.code || data.code;
+    const message = detail.message || (typeof data.error === "string" ? data.error : data.message) || "Service request failed";
+    throw Object.assign(new Error(`${message} (HTTP ${response.status}${code ? ` \xB7 ${code}` : ""})`), { status: response.status, code, retryable: detail.retryable ?? data.retryable });
+  }
+  return data;
+};
+var localServiceOrigin = (value) => {
+  const parsed = new URL(value);
+  if (parsed.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname)) throw new Error("Service URL must use HTTP on this device loopback address.");
+  return parsed.origin;
+};
 function MarketingPage({ ctx }) {
-  const [app, setApp] = useState('Cherry')
-  const [appProfiles, setAppProfiles] = useState(() => ctx.storage.get('appProfiles', { Cherry: { name: 'Cherry', brandSource: 'brand-guidelines.md', brandPromise: 'Practice social situations. Start small. Get better over time.', tone: ['calm', 'matter-of-fact', 'supportive but restrained'], avoidClaims: ['therapy', 'cure', 'heal', 'confidence', 'guaranteed outcomes'], cta: 'unconfigured', channels: [], assets: [], rights: 'unconfigured', claimsApproval: 'unconfigured', events: 'unconfigured', privacy: 'unconfigured' } }))
-  const [selectedId, setSelectedId] = useState(null)
-  const [drafts, setDrafts] = useState(() => ctx.storage.get('drafts', []))
-  const [notice, setNotice] = useState('')
-  const [dirty, setDirty] = useState(false)
-  const [rendered, setRendered] = useState(null)
-  const [activeSlideIndex, setActiveSlideIndex] = useState(0)
-  const [renderError, setRenderError] = useState('')
-  const dirtyRef = React.useRef(false)
-  dirtyRef.current = dirty
-  const records = drafts
-  const selected = records.find(item => item.id === selectedId) || null
-  const cards = records.filter(item => app === 'All apps' || item.app === app)
-  const effectiveProfiles = appProfiles
-  const configuredApps = Object.keys(appProfiles || { Cherry: {} })
-  const getProfile = name => (appProfiles || { Cherry: {} })[name] || {}
-
-  useEffect(() => {
-    const beforeUnload = event => {
-      if (!dirtyRef.current) return
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    window.addEventListener('beforeunload', beforeUnload)
-    return () => window.removeEventListener('beforeunload', beforeUnload)
-  }, [])
-
-  const button = (label, onClick, variant = 'ghost', disabled = false) => jsx(Button, { variant, onClick, disabled, children: label }, label)
-  const badge = (label, accent = false) => jsx(Badge, { variant: accent ? 'secondary' : 'outline', children: label }, label)
-  const fieldLabel = { display: 'grid', gap: '6px', color: 'var(--ui-text-secondary)', fontSize: '0.8rem' }
-  const fieldStyle = { border: `1px solid ${BORDER}`, borderRadius: 'var(--ui-radius-md, 8px)', background: 'transparent', color: 'var(--ui-text-primary)', padding: '9px 10px', font: 'inherit' }
-
-  const reviewReady = item => item.rights === 'cleared' && item.claim === 'supported' && item.cta === 'checked' && item.claimsApproval === 'approved' && item.assets.length > 0 && item.channels.length > 0 && item.events.status === 'configured' && item.events.privacy === 'approved' && item.slides.length > 0
-  const createPipelineConcept = () => {
-    if (dirty && !window.confirm('Discard unsaved draft changes?')) return
-    const item = {
-      ...cherryWorkspaceDraft(`concept-${Date.now()}`, `${app} workspace draft`), app,
-      source: { ...CHERRY_STARTER, id: `brand:${app}`, evidence: app === 'Cherry' ? CHERRY_STARTER.evidence : 'Brand source unconfigured; no facts inferred.' },
-      brief: app === 'Cherry' ? 'Practice social situations. Start small. Get better over time.' : '', cta: 'unconfigured', claimsApproval: 'unconfigured',
-      channels: [], assets: [], events: { status: 'unconfigured', privacy: 'unconfigured' }
-    }
-    const next = [item, ...drafts]
-    ctx.storage.set('drafts', next)
-    setDrafts(next)
-    setSelectedId(item.id)
-    setDirty(false)
-    setNotice(`${app} starter draft added. Unconfigured fields remain blocked pending review.`)
-  }
-  const renderSlides = async () => {
-    if (!selected?.slides?.length) return
-    const slides = selected.slides.map(slide => typeof slide === 'string' ? { headline: slide, body: '' } : ({ ...slide }))
-    if (slides.some(slide => !slide.headline?.trim() || !slide.body?.trim())) { setRenderError('Add a headline and body to every slide before rendering.'); return }
-    if (slides.some(slide => !slide.selectedImage?.dataUrl)) { setRenderError('Choose an image for each slide before rendering.'); return }
-    const payloadSlides = slides.map(({ headline, body, selectedImage }) => ({ headline, body, image_data_url: selectedImage.dataUrl, image_sha256: selectedImage.sha256, source_ref: selectedImage.sourceRef }))
-    try { setRendered(await renderSlideshow({ title: selected.title, slides: payloadSlides, theme: 'neutral' })); setActiveSlideIndex(0) }
-    catch (error) { setRenderError(error.message || 'Render failed.') }
-  }
-  const selectSlideImage = async index => {
+  const [base, setBase] = useState(() => ctx.storage.get("serviceUrl", urlDefault));
+  const [token, setToken] = useState(() => ctx.storage.get("serviceToken", ""));
+  const [connected, setConnected] = useState(false);
+  const [workspace, setWorkspace] = useState(null);
+  const [selectedApp, setSelectedApp] = useState("Cherry");
+  const [health, setHealth] = useState(null);
+  const [draft, setDraft] = useState(null);
+  const [dirty, setDirty] = useState(false);
+  const [view, setView] = useState("Overview");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [rendered, setRendered] = useState(null);
+  const [active, setActive] = useState(0);
+  const [job, setJob] = useState(null);
+  const [jobs, setJobs] = useState([]);
+  const [metricsText, setMetricsText] = useState("");
+  const [profileText, setProfileText] = useState("");
+  const [experimentText, setExperimentText] = useState('{"name":"Cherry concept test","policyVersion":"unconfigured"}');
+  const [observationText, setObservationText] = useState("[]");
+  const generation = React3.useRef(0);
+  const headers = () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
+  const api = async (path, init = {}) => {
+    const origin = localServiceOrigin(base);
+    return json(await fetch(`${origin}${path}`, { ...init, headers: { ...headers(), ...init.headers || {} } }));
+  };
+  const connect = async () => {
+    setError("");
+    setBusy(true);
+    setConnected(false);
+    setWorkspace(null);
+    const request = ++generation.current;
     try {
-      if (!ctx.files?.requestFolder || !ctx.files?.list || !ctx.files?.readDataUrl) throw new Error('File selection is unavailable in this host.')
-      const grant = await ctx.files.requestFolder()
-      if (!grant?.ok || !grant.folder?.id) return
-      const listing = await ctx.files.list(grant.folder.id)
-      const entries = (listing?.entries || []).filter(entry => !entry.isDirectory)
-      if (!listing?.ok || !entries.length) throw new Error('The selected folder has no readable image files.')
-      const name = window.prompt('Image file name', entries[0].name)
-      if (name === null) return
-      const entry = entries.find(item => item.name === name || item.path === name)
-      if (!entry) throw new Error('Choose an image file from the selected folder.')
-      const data = await ctx.files.readDataUrl(grant.folder.id, entry.path)
-      if (!data?.ok || typeof data.url !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/.test(data.url)) throw new Error('The selected file is not a supported PNG, JPEG, or WebP image.')
-      if (data.url.length > 17 * 1024 * 1024) throw new Error('Selected image exceeds the 12 MB limit.')
-      const raw = Uint8Array.from(atob(data.url.slice(data.url.indexOf(',') + 1)), character => character.charCodeAt(0))
-      const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', raw)), byte => byte.toString(16).padStart(2, '0')).join('')
-      const slides = selected.slides.map(slide => typeof slide === 'string' ? { headline: slide, body: '' } : ({ ...slide }))
-      slides[index] = { ...slides[index], selectedImage: { dataUrl: data.url, sha256: digest, sourceRef: `user-folder://${grant.folder.id}/${entry.path}`, folderId: grant.folder.id, path: entry.path } }
-      updateDraft('slides', slides)
-    } catch (error) { setRenderError(error.message || 'Image selection failed.') }
-  }
-  const downloadPng = (slide, index) => {
-    const url = URL.createObjectURL(new Blob([slide.png], { type: 'image/png' }))
-    const link = document.createElement('a'); link.href = url; link.download = `slide-${String(index + 1).padStart(2, '0')}.png`; link.click()
-    URL.revokeObjectURL(url)
-  }
-  const generateCopy = () => {
-    if (selected.slides.length && !window.confirm('Replace current slide copy? Saved versions remain available.')) return
-    setRendered(null)
-    setActiveSlideIndex(0)
-    updateDraft('slides', [
-      'What is one next step you could write down?',
-      'Fictional example: this app lets you write one next step.',
-      `Concept to explore: ${selected.hypothesis}`,
-      'Try writing a next step on paper. No destination or account required.'
-    ])
-  }
-  const updateDraft = (field, value) => {
-    if (!selected?.isDraft) return
-    setDrafts(drafts.map(item => item.id === selected.id ? { ...item, [field]: value, review: 'blocked', ...( ['slides', 'hypothesis', 'brief', 'hook', 'title'].includes(field) ? { claim: 'unreviewed', claimsApproval: 'unconfigured' } : {}) } : item))
-    setDirty(true)
-    setRendered(null)
-    setActiveSlideIndex(0)
-  }
-  const updateSlide = (index, value) => {
-    const slides = [...selected.slides]
-    slides[index] = value
-    updateDraft('slides', slides)
-  }
-  const saveDraft = () => {
-    const versioned = drafts.map(item => item.id === selected.id && item.source ? {
-      ...item, versions: [...item.versions, { number: item.versions.length + 1, savedAt: new Date().toISOString(),
-        title: item.title, source: { ...item.source }, brief: item.brief, hypothesis: item.hypothesis,
-        slides: item.slides.map(slide => typeof slide === 'string' ? { headline: slide, body: '' } : ({ ...slide })), rights: item.rights, claim: item.claim, cta: item.cta,
-        claimsApproval: item.claimsApproval, channels: [...item.channels], assets: [...item.assets], events: { ...item.events }, review: item.review }]
-    } : item)
-    try { ctx.storage.set('drafts', versioned) }
-    catch (error) { setRenderError(error.message || 'Draft save failed.'); return }
-    setDrafts(versioned)
-    setDirty(false)
-    setRenderError('')
-    setNotice('Draft saved in this Hermes plugin on this device.')
-  }
-  const createDraft = () => {
-    if (dirty && !window.confirm('Discard unsaved draft changes?')) return
-    const profile = getProfile(app)
-    const item = { id: `draft-${Date.now()}`, app, title: `Untitled ${app} workspace draft`, format: 'Draft · 0 slides', stage: 'Draft', hook: '', slides: [], isDraft: true,
-      source: { id: `brand:${app}`, kind: 'Brand source', evidence: profile?.brandSource === 'brand-guidelines.md' ? 'Verified brand guide only; product facts and claims not provided.' : 'Brand source unconfigured; no facts inferred.' },
-      brief: profile?.brandPromise || '', hypothesis: '', rights: 'unknown', claim: 'unreviewed', cta: profile?.cta || 'unconfigured',
-      claimsApproval: profile?.claimsApproval || 'unconfigured', channels: profile?.channels || [], assets: profile?.assets || [],
-      events: { status: profile?.events || 'unconfigured', privacy: profile?.privacy || 'unconfigured' }, review: 'blocked', versions: [] }
-    const next = [item, ...drafts]
-    setDrafts(next)
-    ctx.storage.set('drafts', next)
-    setDirty(false)
-    setSelectedId(item.id)
-    setNotice(`${app} starter draft created. CTA, claims approval, channels, assets, rights, events, and privacy remain unconfigured.`)
-  }
-  const deleteDraft = () => {
-    if (!window.confirm('Delete this local draft?')) return
-    const next = drafts.filter(item => item.id !== selected.id)
-    setDrafts(next)
-    ctx.storage.set('drafts', next)
-    setDirty(false)
-    setSelectedId(null)
-    setNotice('Local draft deleted.')
-  }
-  const navigateTo = next => {
-    if (dirty && !window.confirm('Discard unsaved draft changes?')) return
-    if (dirty) setDrafts(ctx.storage.get('drafts', []))
-    setRendered(null)
-    setActiveSlideIndex(0)
-    setRenderError('')
-    setNotice('')
-    setSelectedId(null)
-    setDirty(false)
-    next()
-    setNotice('')
-  }
-  const titleNode = jsxs('header', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '14px', flexWrap: 'wrap' }, children: [jsxs('div', { children: [jsx('div', { style: { color: 'var(--ui-text-quaternary)', fontSize: '0.7rem', letterSpacing: '0.08em', textTransform: 'uppercase' }, children: 'APP MARKETING · LOCAL PROTOTYPE' }), jsx('h1', { style: { margin: '7px 0 4px', fontSize: '1.4rem', fontWeight: 600 }, children: selected ? selected.title : 'Marketing overview' }), jsx('div', { style: { ...MUTED, fontSize: '0.84rem' }, children: 'Slideshow workspace · no accounts, external services, or live business data.' })] }), selected ? button('← Overview', () => navigateTo(() => setSelectedId(null)), 'outline') : null] })
-  const appTabs = jsx('div', { role: 'tablist', 'aria-label': 'App workspace', style: { display: 'flex', gap: '7px', flexWrap: 'wrap' }, children: ['All apps', ...configuredApps].map(item => jsx(Button, { role: 'tab', 'aria-selected': item === app, variant: item === app ? 'secondary' : 'ghost', onClick: () => navigateTo(() => { setApp(item); setSelectedId(null) }), children: item }, item)) })
-  const addAppProfile = () => {
-    const name = window.prompt('App name')?.trim()
-    if (!name || Object.hasOwn(appProfiles || { Cherry: {} }, name)) return
-    const next = { ...(appProfiles || { Cherry: {} }), [name]: { name, brandSource: 'unconfigured', brandPromise: '', tone: [], avoidClaims: [], cta: 'unconfigured', channels: [], assets: [], rights: 'unconfigured', claimsApproval: 'unconfigured', events: 'unconfigured', privacy: 'unconfigured' } }
-    setAppProfiles(next)
-    ctx.storage.set('appProfiles', next)
-    setNotice(`${name} added with unconfigured brand and compliance fields.`)
-  }
-  const metric = (label, caption) => jsxs('section', { style: { ...PANEL, minWidth: '0', flex: '1 1 185px', padding: '13px 15px' }, children: [jsx('div', { style: { color: 'var(--ui-text-quaternary)', fontSize: '0.7rem', textTransform: 'uppercase' }, children: label }), jsx('div', { style: { marginTop: '7px', fontSize: '1.4rem', fontWeight: 600 }, children: '—' }), jsx('div', { style: { ...MUTED, fontSize: '0.77rem', marginTop: '3px' }, children: caption })] })
-  const sampleCard = item => jsx('button', { type: 'button', 'aria-label': `Open ${item.app} workspace draft: ${item.title}`, onClick: () => navigateTo(() => setSelectedId(item.id)), style: { ...PANEL, display: 'flex', flexDirection: 'column', gap: '10px', minWidth: '0', minHeight: '160px', padding: '14px', textAlign: 'left', color: 'inherit', cursor: 'pointer' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '7px', flexWrap: 'wrap' }, children: [badge(item.app, true), badge(item.isDraft ? 'Local draft' : item.stage)] }), jsx('div', { style: { fontSize: '0.98rem', fontWeight: 600 }, children: item.title }), jsx('div', { style: { ...MUTED, fontSize: '0.79rem' }, children: 'Saved only in this Hermes plugin' }), jsx('div', { style: { ...MUTED, fontSize: '0.82rem', lineHeight: 1.45 }, children: item.hook || 'Add an opening hook in the detail editor.' }), jsx('div', { style: { color: 'var(--ui-text-quaternary)', fontSize: '0.73rem', marginTop: 'auto' }, children: 'Local draft · Open details →' })] }, item.id)
-
-  const overview = jsxs(Fragment, { children: [titleNode, appTabs, jsx('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '9px' }, children: [metric('Qualified activations', 'Not connected'), metric('Paid conversions', 'Not connected'), metric('Attributable revenue', 'Not connected')] }), jsxs('section', { style: { display: 'grid', gap: '10px' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }, children: [jsxs('div', { children: [jsx('h2', { style: { margin: 0, fontSize: '1rem', fontWeight: 600 }, children: `${app} workspace drafts` }), jsx('div', { style: { ...MUTED, fontSize: '0.77rem', marginTop: '3px' }, children: `${cards.length} local drafts · no sample creatives` })] }), button('＋ Add app', addAppProfile, 'outline'), button('＋ New local draft', createDraft, 'secondary'), button('＋ Create pipeline concept', createPipelineConcept, 'secondary')] }), cards.length ? jsx('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '10px' }, children: cards.map(sampleCard) }) : jsx(EmptyState, { title: 'Cherry workspace ready to configure', description: 'Create a local draft. No claims, CTA, channel, creative, or outcome is assumed.' })] })] })
-  let detail = null
-  if (selected) {
-    const slideNodes = selected.slides.length ? jsx('ol', { style: { display: 'grid', gap: '7px', margin: 0, paddingLeft: '23px' }, children: selected.slides.map((slide, index) => { const current = typeof slide === 'string' ? { headline: slide, body: '' } : slide; return jsx('li', { style: { padding: '5px 2px' }, children: selected.isDraft ? jsxs('div', { style: { display: 'grid', gap: '6px' }, children: [jsx('input', { 'aria-label': `Slide ${index + 1} headline`, value: current.headline, onChange: event => updateSlide(index, { ...current, headline: event.target.value }), style: fieldStyle }), jsx('textarea', { 'aria-label': `Slide ${index + 1} body`, value: current.body, rows: 2, onChange: event => updateSlide(index, { ...current, body: event.target.value }), style: { ...fieldStyle, width: '100%', resize: 'vertical' } }), button(current.selectedImage ? `Change image for slide ${index + 1}` : `Choose image for slide ${index + 1}`, () => selectSlideImage(index), 'outline')] }) : current.headline }, `${selected.id}-${index}`) }) }) : jsx('div', { style: MUTED, children: 'No slides yet. Add a slide to start this draft.' })
-    const editor = jsxs('section', { style: { ...PANEL, display: 'grid', gap: '11px', padding: '14px' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }, children: [jsx('h2', { style: { margin: 0, fontSize: '1rem' }, children: 'Slideshow details' }), selected.isDraft ? jsxs('div', { style: { display: 'flex', gap: '7px' }, children: [button(dirty ? 'Save draft' : 'Saved', saveDraft, 'secondary', !dirty), button('Delete draft', deleteDraft, 'outline')] }) : badge('Read-only sample')] }), selected.isDraft ? jsx('label', { style: fieldLabel, children: ['Draft title', jsx('input', { 'aria-label': 'Draft title', value: selected.title, onChange: event => updateDraft('title', event.target.value), style: fieldStyle })] }) : jsx('div', { children: selected.title }), selected.isDraft ? jsx('label', { style: fieldLabel, children: ['Opening hook', jsx('textarea', { 'aria-label': 'Opening hook', value: selected.hook, rows: 3, onChange: event => updateDraft('hook', event.target.value), style: { ...fieldStyle, resize: 'vertical' } })] }) : jsx('div', { style: MUTED, children: selected.hook }), jsx('div', { style: { color: 'var(--ui-text-secondary)', fontSize: '0.78rem', textTransform: 'uppercase' }, children: 'Ordered slides' }), slideNodes, selected.isDraft ? jsxs('div', { style: { display: 'flex', gap: '7px', flexWrap: 'wrap' }, children: [button('＋ Add slide', () => updateDraft('slides', [...selected.slides, { headline: '', body: '' }]), 'outline'), selected.slides.length ? button('Remove last slide', () => updateDraft('slides', selected.slides.slice(0, -1)), 'outline') : null] }) : null] })
-    const input = (label, value, onChange) => jsx('label', { style: fieldLabel, children: [label, jsx('textarea', { 'aria-label': label, value, onChange: e => onChange(e.target.value), style: fieldStyle })] })
-    const pipeline = jsxs('section', { style: { ...PANEL, padding: '14px', display: 'grid', gap: '10px' }, children: [
-      jsx('h2', { children: `${selected.app} starter configuration` }),
-      jsx('p', { children: selected.brief || 'No brand promise configured.' }),
-      jsx('p', { children: 'Brand foundation only. No product feature, performance result, or creative is asserted. Avoid therapy, cure, heal, confidence, and guaranteed outcomes.' }),
-      input('Brief', selected.brief, value => updateDraft('brief', value)),
-      input('Working hypothesis (unvalidated)', selected.hypothesis, value => updateDraft('hypothesis', value)),
-      jsx('div', { children: 'CTA: unconfigured · Channels: unconfigured · Assets / rights: unconfigured · Claim approval: unconfigured · Events / privacy: unconfigured' }),
-      jsx('div', { children: 'Status values are local workspace data only. They do not represent rights clearance, claims approval, privacy review, or permission to distribute.' }),
-      button('Render slideshow', renderSlides, 'secondary', !selected.slides.length),
-      renderError ? jsx('div', { role: 'alert', children: renderError }) : null,
-      rendered ? jsxs('section', { style: { display: 'grid', gap: '10px' }, children: [jsx('h3', { children: `Slide ${activeSlideIndex + 1} of ${rendered.slides.length} · ${rendered.dimensions.width} × ${rendered.dimensions.height}` }), jsx('img', { src: `data:image/png;base64,${pngBase64(rendered.slides[activeSlideIndex])}`, alt: `Rendered slide ${activeSlideIndex + 1}`, style: { display: 'block', height: 'min(62vh, 720px)', maxWidth: '100%', objectFit: 'contain', objectPosition: 'left center' } }), jsx('div', { role: 'list', 'aria-label': 'Rendered slides', style: { display: 'flex', gap: '8px', overflowX: 'auto' }, children: rendered.slides.map((slide, index) => jsx('button', { type: 'button', 'aria-label': `Show slide ${index + 1}`, 'aria-current': index === activeSlideIndex ? 'true' : undefined, onClick: () => setActiveSlideIndex(index), style: { width: '52px', height: '92px', flex: '0 0 auto', padding: 0 }, children: jsx('img', { src: `data:image/png;base64,${pngBase64(slide)}`, alt: '' }) }, index)) }), button('Export slideshow ZIP', async () => { try { const bytes = await exportSlideshowZip(rendered, { title: selected.title }); const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' })); const link = document.createElement('a'); link.href = url; link.download = 'slideshow.zip'; link.click(); URL.revokeObjectURL(url) } catch (error) { setRenderError(error.message || 'Export failed.') } }, 'outline')] }) : null,
-      ...selected.slides.slice(1).map((_, index) => button(`Move slide ${index + 2} up`, () => {
-        const slides = [...selected.slides]; [slides[index], slides[index + 1]] = [slides[index + 1], slides[index]]; updateDraft('slides', slides)
-      })),
-      jsx('div', { children: `CTA: ${selected.cta}; claims approval: ${selected.claimsApproval}; rights: ${selected.rights}; channels: ${selected.channels.length ? selected.channels.join(', ') : 'unconfigured'}; events/privacy: ${selected.events.status}/${selected.events.privacy}` }),
-      jsx('p', { children: `External review: ${selected.review}. Starting values do not attest to support or clearance. No external share or publishing is wired.` }),
-      button('Mark ready for external review', () => { if (!reviewReady(selected)) return; setDrafts(drafts.map(item => item.id === selected.id ? { ...item, review: 'ready' } : item)); setDirty(true) }, 'outline', !reviewReady(selected)),
-      jsx('h3', { children: 'Saved versions' }),
-      ...selected.versions.map(version => jsx('details', { children: [jsx('summary', { children: `Version ${version.number} · ${version.savedAt}` }), jsx('pre', { style: { whiteSpace: 'pre-wrap' }, children: JSON.stringify(version, null, 2) })] }, version.number))
-    ] })
-    const review = jsxs('section', { style: { ...PANEL, display: 'grid', gap: '7px', padding: '13px 15px' }, children: [jsx('h2', { style: { margin: 0, fontSize: '0.92rem' }, children: 'Review before any external use' }), ...[`Brand source: ${selected.source.id} · ${selected.source.evidence}`, 'Product claims: not provided; approval unconfigured', 'CTA destination: not provided', 'Asset rights and provenance: not provided; clearance unconfigured', 'Channels: not provided', 'Events and privacy: unconfigured', 'Human approval: required before sharing'].map(text => jsx('div', { style: { ...MUTED, fontSize: '0.79rem' }, children: text }, text))] })
-    const performance = jsxs('section', { style: { ...PANEL, display: 'grid', gap: '7px', padding: '13px 15px' }, children: [jsx('h2', { style: { margin: 0, fontSize: '0.92rem' }, children: 'Performance' }), jsx('div', { style: { ...MUTED, fontSize: '0.82rem' }, children: 'No platform or attribution data connected. Outcome is unavailable—not zero.' })] })
-    detail = jsxs(Fragment, { children: [titleNode, appTabs, jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'center' }, children: [jsx('span', { style: { color: 'var(--ui-text-secondary)', fontSize: '0.78rem' }, children: `Status · ${selected.stage}` }), badge(dirty ? 'Unsaved changes' : 'Local draft', true)] }), editor, pipeline, review, performance, notice ? jsx('div', { role: 'status', 'aria-live': 'polite', style: MUTED, children: notice }) : null] })
-  }
-  return jsx('main', { className: 'h-full overflow-y-auto px-4 py-5 sm:px-6 lg:px-8', children: jsx('div', { style: { maxWidth: '1120px', margin: '0 auto', display: 'grid', gap: '15px', paddingBottom: '20px' }, children: selected ? detail : overview }) })
+      const origin = localServiceOrigin(base);
+      const health2 = await json(await fetch(`${origin}/api/health`));
+      if (request !== generation.current) return;
+      if (!health2) throw new Error("Service health response was empty.");
+      ctx.storage.set("serviceUrl", base);
+      ctx.storage.set("serviceToken", token);
+      const data = await api(`/api/workspace?app=${encodeURIComponent(selectedApp)}`);
+      if (request !== generation.current) return;
+      setHealth(health2);
+      setWorkspace(data);
+      setConnected(true);
+      setNotice("Connected to the marketing service. Workspace records are service-owned.");
+    } catch (e) {
+      if (request === generation.current) setError(e.message || "Marketing service is unavailable.");
+    } finally {
+      if (request === generation.current) setBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (ctx.storage.get("serviceUrl") && ctx.storage.get("serviceToken")) connect();
+  }, []);
+  const reload = async () => {
+    const req = ++generation.current;
+    try {
+      const data = await api(`/api/workspace?app=${encodeURIComponent(draft?.app || selectedApp)}`);
+      if (req === generation.current) setWorkspace(data);
+    } catch (e) {
+      if (req === generation.current) setError(e.message);
+    }
+  };
+  const edit = (path, value) => {
+    setDraft((current) => {
+      const next = structuredClone(current);
+      let target = next;
+      path.slice(0, -1).forEach((part, i) => {
+        const child = path[i + 1];
+        target = target[part] ??= /^\d+$/.test(child) ? [] : {};
+      });
+      target[path.at(-1)] = value;
+      return next;
+    });
+    setDirty(true);
+    setRendered(null);
+  };
+  const openDraft = (item) => {
+    const copy = structuredClone(item);
+    for (const slide of copy.slides || []) {
+      const image = slide.selectedImage;
+      if (image?.contentRef && !image.dataUrl && selectedImageData.has(image.sha256)) image.dataUrl = selectedImageData.get(image.sha256);
+    }
+    ;
+    setDraft(copy);
+    setDirty(false);
+    setRendered(null);
+    setView("Slideshows");
+    setError("");
+  };
+  const createDraft = async () => {
+    const item = { id: `draft-${crypto.randomUUID()}`, app: selectedApp, title: `Untitled ${selectedApp} draft`, hook: "", slides: [], brief: "", hypothesis: "", source: { evidence: "", claim: "unreviewed", rights: "unknown" }, qualityReviews: [] };
+    setDraft(item);
+    setDirty(true);
+    setView("Slideshows");
+    setNotice("New draft is local until saved to the service.");
+  };
+  const saveDraft = async () => {
+    if (!draft) return;
+    setBusy(true);
+    setError("");
+    try {
+      const draftToSave = structuredClone(draft);
+      for (const slide of draftToSave.slides || []) {
+        const image = slide.selectedImage;
+        if (image?.contentRef && !image.dataUrl) {
+          const retained = selectedImageData.get(image.sha256);
+          if (!retained) throw new Error("The selected image bytes are no longer available in this UI session. Reattach the image before saving.");
+          image.dataUrl = retained;
+        }
+      }
+      const result = await api(`/api/drafts/${encodeURIComponent(draftToSave.id)}`, { method: "PUT", body: JSON.stringify({ draft: draftToSave, expectedRevision: workspace?.revision ?? 0 }) });
+      const readback = await api(`/api/workspace?app=${encodeURIComponent(draft.app || selectedApp)}`);
+      if (!readback.drafts?.some((item) => item.id === draft.id)) throw new Error("Save succeeded but draft readback did not include this record.");
+      const verified = readback.drafts.find((item) => item.id === draft.id);
+      for (const slide of verified.slides || []) {
+        const image = slide.selectedImage;
+        if (image?.contentRef && selectedImageData.has(image.sha256)) image.dataUrl = selectedImageData.get(image.sha256);
+      }
+      ;
+      setWorkspace(readback);
+      setDraft(verified);
+      setDirty(false);
+      setNotice(`Saved and verified at service revision ${result.revision ?? readback.revision}.`);
+    } catch (e) {
+      setError(e.message || "Save failed. Your unsaved edits are still here.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const attachImage = async (index, file) => {
+    if (!file) return;
+    try {
+      if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) throw new Error("Choose a PNG, JPEG, or WebP image.");
+      if (file.size > 12 * 1024 * 1024) throw new Error("Choose an image no larger than 12 MiB.");
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error("Could not read selected image."));
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(file);
+      });
+      await acceptImage(index, dataUrl, file.name, null, file.name);
+    } catch (e) {
+      setError(e.message || "Image attachment failed.");
+    }
+  };
+  const acceptImage = async (index, dataUrl, sourceRef, folderId, path) => {
+    const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(dataUrl || "");
+    if (!match || match[2].length > Math.ceil(12 * 1024 * 1024 / 3) * 4) throw new Error("Choose a valid PNG, JPEG, or WebP image no larger than 12 MiB.");
+    const binary = atob(match[2]);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    if (bytes.length > 12 * 1024 * 1024) throw new Error("Choose an image no larger than 12 MiB.");
+    const signature = match[1] === "png" ? bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71 : match[1] === "jpeg" ? bytes[0] === 255 && bytes[1] === 216 : String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+    if (!signature) throw new Error("Image bytes do not match the selected image type.");
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
+    selectedImageData.set(digest, dataUrl);
+    const slides = [...draft.slides];
+    slides[index] = { ...slides[index], selectedImage: { dataUrl, sha256: digest, sourceRef, ...folderId ? { folderId } : {}, path } };
+    setDraft({ ...draft, slides });
+    setDirty(true);
+    setRendered(null);
+    setNotice("Image selected locally. Save the draft to store and verify it with the service.");
+  };
+  const chooseNativeImage = async (index) => {
+    try {
+      if (!ctx.files?.requestFolder || !ctx.files?.list || !ctx.files?.readDataUrl) throw new Error("Native folder access is unavailable; use the browser file picker.");
+      const grant = await ctx.files.requestFolder();
+      if (!grant?.ok || !grant.folderId) throw new Error("Native image folder access was not granted.");
+      const listed = await ctx.files.list(grant.folderId);
+      const entry = (listed?.entries || []).find((item) => /\.(png|jpe?g|webp)$/i.test(item.path || item.name || ""));
+      if (!entry) throw new Error("No PNG, JPEG, or WebP image was found in the selected folder.");
+      const result = await ctx.files.readDataUrl(grant.folderId, entry.path || entry.name);
+      if (!result?.ok || !result.dataUrl) throw new Error("Could not read the selected native image.");
+      await acceptImage(index, result.dataUrl, `${grant.folderId}/${entry.path || entry.name}`, grant.folderId, entry.path || entry.name);
+    } catch (e) {
+      setError(e.message || "Image attachment failed.");
+    }
+  };
+  const runReview = async () => {
+    try {
+      const out = await api("/api/review", { method: "POST", body: JSON.stringify({ draftId: draft.id, revision: workspace.revision }) });
+      setNotice(`Review: ${out.readiness?.status || "blocked"} \xB7 ${out.quality?.status || "quality assessment returned"}`);
+      await reload();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  const render = async () => {
+    try {
+      const out = await api("/api/render", { method: "POST", body: JSON.stringify({ jobId: crypto.randomUUID(), draftId: draft.id, revision: workspace.revision }) });
+      const actualJob = await api(`/api/jobs/${encodeURIComponent(out.jobId)}`);
+      setJob(actualJob);
+      setJobs((current) => [actualJob, ...current.filter((item) => item.id !== actualJob.id)]);
+      setRendered(out.rendered);
+      setActive(0);
+      setNotice(`Rendered saved revision \xB7 ${actualJob.status}.`);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  const exportZip = async () => {
+    try {
+      const out = await api("/api/export", { method: "POST", body: JSON.stringify({ draftId: draft.id, revision: workspace.revision, renderJobId: job?.id }) });
+      const bin = atob(out.zipBase64);
+      const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      const a = document.createElement("a");
+      const objectUrl = URL.createObjectURL(new Blob([bytes], { type: "application/zip" }));
+      a.href = objectUrl;
+      a.download = "marketing-slideshow.zip";
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+      setNotice(`Exported service artifact \xB7 ${out.manifest?.files?.length ?? "verified"} files.`);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  const importLegacy = async () => {
+    const legacy = ctx.storage.get("drafts", []);
+    if (!legacy.length) {
+      setNotice("No legacy plugin drafts found to migrate.");
+      return;
+    }
+    ;
+    try {
+      const source = JSON.stringify(legacy);
+      const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+      const digest = Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+      const migrationId = `plugin-local-${digest}`;
+      ctx.storage.set("legacyImportBackup", { sourceHash: digest, drafts: legacy });
+      const drafts = legacy.map((item, index) => typeof item === "string" ? { id: `legacy-${index}-${digest.slice(0, 16)}`, app: selectedApp, title: `Legacy draft ${index + 1}`, slides: [{ headline: item, body: "" }], source: { claim: "unreviewed", rights: "unknown" }, qualityReviews: [] } : item);
+      await api("/api/legacy-import", { method: "POST", body: JSON.stringify({ migrationId, profiles: ctx.storage.get("appProfiles", {}), drafts }) });
+      await reload();
+      setNotice("Legacy data imported and service readback completed. Local backup retained.");
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  const refreshHealth = async () => {
+    try {
+      const [snapshot, listed] = await Promise.all([api("/api/health"), api("/api/jobs")]);
+      setHealth(snapshot);
+      setJobs(Array.isArray(listed) ? listed : listed.jobs || []);
+      setJob((Array.isArray(listed) ? listed : listed.jobs || [])[0] || null);
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  const nav = ["Overview", "Slideshows", "Experiments", "Outcomes", "System health", "App settings"];
+  const button = (text2, action, disabled = false) => h3(Button, { key: text2, onClick: action, disabled: disabled || busy, variant: "outline" }, text2);
+  const input = (title, value, onChange, multiline = false) => h3("label", { style: labelStyle, key: title }, title, multiline ? h3("textarea", { "aria-label": title, value: value ?? "", onChange: (e) => onChange(e.target.value), rows: 3, style: fieldStyle }) : h3("input", { type: title.startsWith("Bearer token") ? "password" : "text", "aria-label": title, value: value ?? "", onChange: (e) => onChange(e.target.value), style: fieldStyle }));
+  const records = workspace?.drafts || [];
+  const thumbnails = (rendered?.slides || []).map((s, i) => h3("button", { key: i, "aria-label": `Show slide ${i + 1}`, onClick: () => setActive(i), "aria-current": active === i ? "true" : void 0, style: { width: 52, height: 92, flex: "0 0 auto", padding: 0 } }, h3("img", { alt: "", src: `data:image/png;base64,${s.pngBase64 || s.png || ""}`, style: { width: "100%", height: "100%", objectFit: "contain" } })));
+  const renderPanel = rendered && h3("section", { style: panel3 }, h3("h3", null, "Portrait preview"), h3("img", { alt: `Rendered slide ${active + 1}`, src: `data:image/png;base64,${rendered.slides?.[active]?.pngBase64 || rendered.slides?.[active]?.png || ""}`, style: { height: "min(62vh, 720px)", maxWidth: "100%", objectFit: "contain" } }), h3("div", { style: { display: "flex", gap: 8, overflowX: "auto" }, role: "list", "aria-label": "Rendered slide thumbnails" }, thumbnails));
+  let content;
+  if (view === "App settings") content = h3(Fragment, null, h3("section", { style: panel3 }, h3("h2", null, "Service connection"), input("Local service URL", base, setBase), input("Bearer token (stored locally; masked)", token, setToken), button(connected ? "Reconnect" : "Connect", connect), button("Import legacy plugin data", importLegacy, !connected), h3("p", { role: "status" }, connected ? `Connected \xB7 revision ${workspace?.revision}` : "Disconnected. Configure the local service and token to load records."), h3("p", null, "Token is excluded from export and sent only as the Authorization header to this configured service.")), h3("section", { style: panel3 }, h3("h2", null, `${selectedApp} app profile`), h3("p", null, "Service owned profile. Enter sourced brand, CTA, claim, rights, event, and privacy records as JSON; saving does not attest approval."), input(`${selectedApp} profile JSON`, profileText || JSON.stringify(workspace?.profiles?.find((p) => p.name === selectedApp) || { appId: selectedApp.toLowerCase(), name: selectedApp, brandPromise: "", claims: [], rights: "unknown", events: [], privacy: "unconfigured" }, null, 2), setProfileText, true), button("Save profile with revision check", async () => {
+    try {
+      const profile = JSON.parse(profileText);
+      const out = await api(`/api/profiles/${encodeURIComponent(selectedApp)}`, { method: "PUT", body: JSON.stringify({ expectedRevision: workspace.revision, profile }) });
+      setNotice(`Profile saved at service revision ${out.revision}.`);
+      await reload();
+    } catch (e) {
+      setError(e.message);
+    }
+  }, !connected || !profileText)));
+  else if (view === "System health") content = h3(Fragment, null, h3(SystemHealth, { snapshot: health, metrics: {}, onRetry: refreshHealth }), ...jobs.length ? jobs.map((item) => h3(JobDetail, { key: item.id, job: item, onRetry: (id) => item.status === "failed" && api(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }).then(refreshHealth).catch((e) => setError(e.message)) })) : [h3(JobDetail, { key: "empty", job: null })]);
+  else if (view === "Experiments") content = h3("section", { style: panel3 }, h3("h2", null, "Experiment recommendation"), input("Experiment policy and version (JSON)", experimentText, setExperimentText, true), input("Observations (JSON)", observationText, setObservationText, true), button("Recommend decision", async () => {
+    try {
+      const out = await api("/api/experiments/recommend", { method: "POST", body: JSON.stringify({ draftId: draft?.id, revision: workspace?.revision, experiment: JSON.parse(experimentText), observations: JSON.parse(observationText) }) });
+      setNotice(`Recommendation: ${out.decision?.status || out.status || "inconclusive"} \xB7 ${out.decision?.rationale || "No configured policy or sufficient evidence."}`);
+      await reload();
+    } catch (e) {
+      setError(e.message);
+    }
+  }, !connected), h3("p", null, "No decision is inferred without service-validated policy and observations."));
+  else if (view === "Slideshows" && draft) content = h3(
+    Fragment,
+    null,
+    h3(
+      "section",
+      { style: panel3 },
+      h3("header", null, h3("h2", null, draft.title || "Draft")),
+      input("Title", draft.title, (v) => edit(["title"], v)),
+      input("Source evidence and pointers", draft.source?.evidence, (v) => edit(["source", "evidence"], v), true),
+      input("Brief", draft.brief, (v) => edit(["brief"], v), true),
+      input("Working hypothesis (unvalidated)", draft.hypothesis, (v) => edit(["hypothesis"], v), true),
+      h3("h3", null, "Structured slides"),
+      ...(draft.slides || []).map((slide, i) => h3("section", { key: i, style: panel3 }, input(`Slide ${i + 1} headline`, slide.headline, (v) => edit(["slides", String(i), "headline"], v)), input(`Slide ${i + 1} body`, slide.body, (v) => edit(["slides", String(i), "body"], v), true), button(`Choose native image for slide ${i + 1}`, () => chooseNativeImage(i)), h3("label", { style: labelStyle }, "Browser fallback image picker", h3("input", { type: "file", accept: "image/png,image/jpeg,image/webp", onChange: (e) => attachImage(i, e.target.files?.[0]) })), h3("div", null, `Image: ${slide.selectedImage?.contentRef ? "saved service asset" : "not attached"} \xB7 rights status: ${slide.selectedImage?.rights || "unknown"}`))),
+      button("Add slide", () => edit(["slides"], [...draft.slides || [], { headline: "", body: "", selectedImage: null }]))
+    ),
+    h3("section", { style: panel3 }, h3("h3", null, "Source evidence and compliance inputs"), ...["claim", "rights", "cta", "channels", "events", "privacy"].map((k) => input(`${k} \xB7 unapproved until reviewed`, draft.source?.[k] ?? draft[k] ?? "", (v) => edit(["source", k], v))), h3("div", null, "These are operator inputs, not approvals. Rights, privacy, claims, and distribution remain blocked until the service review has evidence."), h3("h3", null, "Quality review \xB7 7 dimensions"), ...["clarity", "relevance", "specificity", "credibility", "brandFit", "accessibility", "craft"].map((k) => h3("section", { key: k, style: { display: "grid", gridTemplateColumns: "minmax(130px, 1fr) minmax(100px, 2fr)", gap: 8 } }, input(`${k} score (0\u20135; blank = unassessed)`, draft.qualityReviews?.[0]?.dimensions?.[k]?.score ?? "", (v) => edit(["qualityReviews", "0", "dimensions", k, "score"], v === "" ? "" : Number(v))), input(`${k} rationale and evidence pointer`, draft.qualityReviews?.[0]?.dimensions?.[k]?.rationale ?? "", (v) => edit(["qualityReviews", "0", "dimensions", k, "rationale"], v)))), input("Reviewer identity", draft.qualityReviews?.[0]?.reviewer ?? "", (v) => edit(["qualityReviews", "0", "reviewer"], v)), input("Review timestamp (ISO 8601)", draft.qualityReviews?.[0]?.reviewedAt ?? "", (v) => edit(["qualityReviews", "0", "reviewedAt"], v)), button("Run service review", runReview, !connected || dirty), h3("div", null, `Review status: ${draft.review?.status || draft.review || "not assessed"}`)),
+    h3("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, button(dirty ? "Save to service" : `Saved \xB7 revision ${workspace?.revision ?? "\u2014"}`, saveDraft, !connected || !dirty), button("Render saved revision", render, !connected || dirty || !draft.id), button("Export rendered ZIP", exportZip, !rendered || !job)),
+    renderPanel
+  );
+  else if (view === "Slideshows") content = h3(EmptyState, { title: "No draft selected", description: "Open a service draft or create one." }, button("New draft", createDraft, !connected));
+  else if (view === "Overview") content = h3("section", { style: panel3 }, h3("h2", null, `Marketing overview \xB7 ${selectedApp}`), h3("label", { style: labelStyle }, "App", h3("select", { "aria-label": "App", value: selectedApp, onChange: (e) => {
+    const app = e.target.value;
+    setSelectedApp(app);
+    setDraft(null);
+    setDirty(false);
+    setRendered(null);
+    setView("Overview");
+    setWorkspace(null);
+    setError("");
+    const req = ++generation.current;
+    api(`/api/workspace?app=${encodeURIComponent(app)}`).then((data) => {
+      if (req === generation.current) setWorkspace(data);
+    }).catch((error2) => {
+      if (req === generation.current) setError(error2.message);
+    });
+  }, style: fieldStyle }, ...Array.from(/* @__PURE__ */ new Set(["Cherry", ...(workspace?.profiles || []).map((p) => p.name || p.appId).filter(Boolean)])).map((app) => h3("option", { key: app, value: app }, app)))), h3("p", null, connected ? `Service revision ${workspace?.revision}. ${records.length} saved drafts.` : "Service disconnected \xB7 metrics and records unavailable."), h3("div", { style: { display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 10 } }, ...["Qualified activations", "Paid conversions", "Attributable revenue"].map((metric) => h3("section", { key: metric, style: panel3 }, h3("strong", null, metric), h3("div", null, metric === "Qualified activations" && workspace?.observations?.length ? "Source observations available" : "Unavailable with source/window")))), h3("div", { style: { display: "grid", gap: 8 } }, ...records.map((item) => h3("button", { key: item.id, onClick: () => openDraft(item), style: { ...fieldStyle, textAlign: "left" } }, `${item.title || item.id} \xB7 ${item.stage || "draft"} \xB7 Open`))), button("New draft", createDraft, !connected), button("Sync Postiz (read only)", async () => {
+    try {
+      const result = await api("/api/postiz/sync", { method: "POST", body: JSON.stringify({ app: selectedApp, window: "last-30-days", days: 30 }) });
+      setNotice(result.status === "available" ? `Read ${result.posts?.length || 0} posts and ${result.observations?.length || 0} observations.` : `Postiz unavailable: ${result.reason || result.status || "no provider data"}`);
+      await reload();
+    } catch (e) {
+      setError(e.message);
+    }
+  }, !connected));
+  else content = h3("section", { style: panel3 }, h3("h2", null, "Outcome import"), h3("p", null, "Import owner approved aggregate rows only. Raw event data and provider credentials are not accepted."), input("Aggregate outcomes JSON", metricsText, setMetricsText, true), button("Import outcomes", async () => {
+    try {
+      const rows = JSON.parse(metricsText);
+      const result = await api("/api/outcomes/import", { method: "POST", body: JSON.stringify({ app: selectedApp, rows, eventDefinitions: workspace?.profile?.events || [], attributionPolicy: workspace?.profile?.attributionPolicy || null, source: "operator-import", window: null }) });
+      setNotice(`Imported ${result.observations?.length ?? 0} service observations.`);
+      await reload();
+    } catch (e) {
+      setError(e.message);
+    }
+  }, !connected), h3("h3", null, "Imported observations"), ...(workspace?.observations || []).map((row, i) => h3("pre", { key: i, style: { whiteSpace: "pre-wrap" } }, JSON.stringify(row))), h3("p", null, workspace?.observations?.length ? "Values below are service returned observations." : "No observations returned by service. Outcome is unavailable, not zero."));
+  return h3("main", { style: { padding: "20px", color: "var(--ui-text-primary)" } }, h3("div", { style: { maxWidth: 1120, margin: "auto", display: "grid", gap: 14 } }, h3("header", null, h3("div", { style: { color: "var(--ui-text-tertiary)", fontSize: 12 } }, "APP MARKETING \xB7 SERVICE WORKSPACE"), h3("h1", null, draft && view === "Slideshows" ? draft.title : "Marketing workflow")), h3("nav", { style: { display: "flex", flexWrap: "wrap", gap: 6 } }, ...nav.map((name) => h3(Button, { key: name, variant: name === view ? "secondary" : "ghost", onClick: () => {
+    if (dirty && typeof globalThis.confirm === "function" && !globalThis.confirm("Discard unsaved draft changes?")) return;
+    if (dirty) {
+      setDraft(null);
+      setDirty(false);
+      setRendered(null);
+    }
+    setView(name);
+  } }, name))), error ? h3("div", { role: "alert" }, error) : null, notice ? h3("div", { role: "status", "aria-live": "polite" }, notice) : null, content));
 }
-
-export default {
-  id: 'marketing-system',
-  name: 'App Marketing',
-  description: 'App-agnostic marketing workspace with Cherry configured first; factual inputs remain unconfigured',
-  register(ctx) {
-    ctx.register({ id: 'page', area: ROUTES_AREA, data: { path: ROUTE }, render: () => jsx(MarketingPage, { ctx }) })
-    ctx.register({ id: 'nav', area: SIDEBAR_NAV_AREA, data: { path: ROUTE, label: 'Marketing', codicon: 'megaphone' } })
-    ctx.register({ id: 'open', area: PALETTE_AREA, data: { id: 'marketing-system.open', label: 'Open app marketing', keywords: ['marketing', 'slideshows', 'app workspace'], run: () => host.navigate(ROUTE) } })
-  }
-}
+var entry_default = { id: "marketing-system", name: "App Marketing", description: "Service-backed marketing workflow", register(ctx) {
+  ctx.register({ id: "page", area: ROUTES_AREA, data: { path: ROUTE }, render: () => jsx(MarketingPage, { ctx }) });
+  ctx.register({ id: "nav", area: SIDEBAR_NAV_AREA, data: { path: ROUTE, label: "Marketing", codicon: "megaphone" } });
+  ctx.register({ id: "open", area: PALETTE_AREA, data: { id: "marketing-system.open", label: "Open app marketing", run: () => host.navigate(ROUTE) } });
+} };
+export {
+  entry_default as default
+};

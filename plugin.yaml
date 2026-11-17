@@ -1,6 +1,6 @@
 name: marketing-system
 version: 0.1.0
-description: App-agnostic Hermes Desktop slideshow workspace prototype with fictional App A/B/C examples.
+description: App-agnostic service-backed Hermes Desktop marketing workflow with Cherry configured first.
 license: MIT
-tags: [marketing, desktop, slideshow, local-prototype]
+tags: [marketing, desktop, slideshow, service-backed]
 desktop: desktop/plugin.js
