@@ -7,7 +7,7 @@ import crypto from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { startLocal } from '../src/service/lifecycle.mjs'
 
-test('live service saves, renders through Python HTTP renderer, exports a real ZIP, and stops', { skip: 'Pending renderer lane protocol 2 integration; lifecycle now trusts the real Handler health response.' }, async t => {
+test('live service saves, renders through Python HTTP renderer, exports a real ZIP, and stops', async t => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'marketing-e2e-'))
   const rendererPort = await freePort()
   const servicePort = await freePort()
@@ -27,13 +27,22 @@ test('live service saves, renders through Python HTTP renderer, exports a real Z
     const rendered = (await response.json()).rendered
     assert.equal(rendered.dimensions.width, 1080)
     assert.equal(rendered.slides.length, 1)
-    assert.ok(rendered.slides[0].pngBase64.length > 100)
+    const renderedBytes = Buffer.from(rendered.slides[0].pngBase64, 'base64')
+    assert.equal(rendered.slides[0].image_sha256, sha256)
+    const renderedSha256 = crypto.createHash('sha256').update(renderedBytes).digest('hex')
+    const dimensions = spawnSync('/opt/hermes/.venv/bin/python', ['-c', "from PIL import Image; import io,sys; im=Image.open(io.BytesIO(sys.stdin.buffer.read())); print(f'{im.width}x{im.height}')"], { input: renderedBytes, encoding: 'utf8' }).stdout.trim()
+    assert.equal(dimensions, '1080x1920')
     response = await fetch(`${base}/api/export`, { method: 'POST', headers, body: JSON.stringify({ draftId: 'e2e-draft', revision: 1, renderJobId: 'e2e-render' }) })
     assert.equal(response.status, 200)
     const exported = await response.json()
     const zip = Buffer.from(exported.zipBase64, 'base64')
     assert.equal(zip.subarray(0, 4).toString(), 'PK\x03\x04')
     assert.ok(zip.length > 500)
+    const zipCheck = spawnSync('/opt/hermes/.venv/bin/python', ['-c', "import hashlib,io,json,sys,zipfile; z=zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())); m=json.loads(z.read('manifest.json')); p=z.read(m['files'][0]); print(json.dumps({'files':m['files'],'sha256':hashlib.sha256(p).hexdigest(),'png':p.startswith(b'\\x89PNG\\r\\n\\x1a\\n')}))"], { input: zip, encoding: 'utf8' })
+    const archived = JSON.parse(zipCheck.stdout)
+    assert.deepEqual(archived.files, ['slide-01.png'])
+    assert.equal(archived.sha256, renderedSha256)
+    assert.equal(archived.png, true)
     t.diagnostic(`actual ZIP archive bytes: ${zip.length}`)
     assert.equal(exported.manifest.draftId, 'e2e-draft')
     const metadata = JSON.parse(await fs.readFile(service.connection, 'utf8'))
