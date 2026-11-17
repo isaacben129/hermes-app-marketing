@@ -18,6 +18,8 @@ export class EventLedger {
     this.#snapshotsDir = path.join(baseDir, 'snapshots')
   }
 
+  get baseDir() { return this.#baseDir }
+
   async #ensureDirs() {
     await fs.mkdir(this.#baseDir, { recursive: true })
     await fs.mkdir(this.#snapshotsDir, { recursive: true })

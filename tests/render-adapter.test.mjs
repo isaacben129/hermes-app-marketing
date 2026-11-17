@@ -71,7 +71,7 @@ const fakes = (overrides = {}) => {
   assert.equal(result.status, 'fixture')
   assert.equal(result.artifact.id, 'artifact-1')
   assert.equal(calls.update[0][1].stage, 'completed')
-  assert.equal(calls.update[0][1].artifactStatus, 'fixture')
+  assert.equal(calls.update[0][1].artifactStatus, 'local-preview')
 }
 
 {
@@ -114,3 +114,5 @@ const fakes = (overrides = {}) => {
 }
 
 console.log('PASS queued/local validation, approved sources, injected renderer/store, fixture labeling, and redacted failure persistence')
+
+{ const record={id:'fixture-preview',local:true,stage:'queued',fixtureOnly:true,slides:[{sourceRefs:[]}]};const result=await renderJob(record,{renderer:{render:async()=>({slides:[]})},jobStore:{saveArtifact:async()=>({id:'a'}),updateJob:async()=>{}}});assert.equal(result.status,'fixture');assert.equal(result.job.artifactStatus,'local-preview') }

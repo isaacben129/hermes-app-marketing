@@ -20,7 +20,7 @@ export class LocalJobRunner {
   async #record(job, from, to, details = {}) {
     const event = await this.#ledger.appendEvent({
       type: 'job.lifecycle',
-      payload: { jobId: job.id, from, to, ...details }
+      payload: { jobId: job.id, from, to, name: job.name, input: job.input, ...details }
     }, `job:${job.id}:${to}`)
     job.status = to
     job.updatedAt = event.timestamp
@@ -71,6 +71,13 @@ export class LocalJobRunner {
       await this.transition(id, 'failed', { error: String(error?.message ?? error) })
       throw error
     }
+  }
+
+  async restore(events) {
+    const journal = events ?? await this.#ledger.getEvents()
+    for (const event of journal) { if (event.type !== 'job.lifecycle') continue; const p=event.payload??{}; let job=this.#jobs.get(p.jobId); if(!job && p.to==='queued'){job={id:p.jobId,name:p.name??'local task',input:p.input??{},status:'queued',createdAt:event.timestamp,updatedAt:event.timestamp};this.#jobs.set(job.id,job)} if(job){job.status=p.to;job.updatedAt=event.timestamp;if(p.artifactId)job.artifactId=p.artifactId;if(p.to==='failed')job.failureCategory=p.category??'failed'}}
+    for(const job of this.#jobs.values())if(job.status==='running'){await this.#record(job,'running','failed',{category:'interrupted'});job.failureCategory='interrupted'}
+    return this.list()
   }
 
   get(id) {

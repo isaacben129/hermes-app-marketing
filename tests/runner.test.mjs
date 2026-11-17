@@ -47,3 +47,5 @@ describe('safe local job lifecycle', () => {
     assert.equal(runner.get('job-3').status, 'failed')
   })
 })
+
+test('restore reconstructs jobs and marks previously running jobs interrupted', async()=>{const {LocalJobRunner}=await import('../src/jobs/runner.mjs');const {EventLedger}=await import('../src/storage/ledger.mjs');const ledger=new EventLedger({baseDir:TEST_DIR});await ledger.appendEvent({type:'job.lifecycle',payload:{jobId:'recover-1',from:null,to:'queued',name:'render',input:{}}});await ledger.appendEvent({type:'job.lifecycle',payload:{jobId:'recover-1',from:'queued',to:'running'}});const runner=new LocalJobRunner({ledger});await runner.restore();assert.equal(runner.get('recover-1').status,'failed');assert.equal(runner.get('recover-1').failureCategory,'interrupted')})

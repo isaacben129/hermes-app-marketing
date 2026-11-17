@@ -11,7 +11,7 @@ function validateJob(job, deps) {
   if (!job || job.local !== true || job.stage !== 'queued') {
     throw new Error('Job must be locally queued before rendering.')
   }
-  if (!Array.isArray(job.slides) || job.slides.length === 0 || job.slides.some(slide => !hasApprovedSourceRef(slide))) {
+  if (!Array.isArray(job.slides) || job.slides.length === 0 || (job.fixtureOnly !== true && job.slides.some(slide => !hasApprovedSourceRef(slide)))) {
     throw new Error('Every slide must include an approved source reference.')
   }
   if (!deps?.renderer || typeof deps.renderer.render !== 'function') {
@@ -33,7 +33,7 @@ export async function renderJob(job, { renderer, jobStore, appProfile } = {}) {
   try {
     const rendered = await renderer.render(job, { appProfile })
     const artifact = await jobStore.saveArtifact(job.id, rendered)
-    const artifactStatus = fixtureOnly ? 'fixture' : 'production'
+    const artifactStatus = fixtureOnly ? 'local-preview' : 'rendered-unapproved'
     const updatedJob = {
       ...job,
       stage: 'completed',
