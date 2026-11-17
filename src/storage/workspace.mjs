@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 
-const empty = () => ({ revision: 0, profiles: [], drafts: [], observations: [], decisions: [], posts: [] })
+const empty = () => ({ revision: 0, profiles: [], drafts: [], observations: [], decisions: [], posts: [], draftRevisions: {} })
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex')
 const imageData = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
@@ -95,7 +95,7 @@ export class WorkspaceStore {
       if (p.app === app && ['profile.saved', 'review.completed', 'generation.intake', 'experiment.recommended', 'observations.imported', 'postiz.synced', 'postiz.sync_failed'].includes(event.type)) {
         state.revision++
         if (event.type === 'profile.saved') state.profiles = [p.profile]
-        if (event.type === 'review.completed') state.drafts = state.drafts.map(draft => draft.id === p.draftId && hash(JSON.stringify(draft)) === p.contentHash ? { ...draft, quality: p.quality, readiness: p.readiness } : draft)
+        if (event.type === 'review.completed') state.drafts = state.drafts.map(draft => { const snapshot = structuredClone(draft); for (const key of ['quality', 'readiness', 'generatedAssets']) delete snapshot[key]; return draft.id === p.draftId && hash(JSON.stringify(snapshot)) === p.contentHash ? { ...draft, quality: p.quality, readiness: p.readiness } : draft })
         if (event.type === 'generation.intake') state.drafts = state.drafts.map(draft => draft.id === p.draftId ? { ...draft, generatedAssets: [...(draft.generatedAssets ?? []), p.asset] } : draft)
         if (event.type === 'experiment.recommended') state.decisions.push(p.decision)
         if (event.type === 'observations.imported') state.observations.push(...p.observations)

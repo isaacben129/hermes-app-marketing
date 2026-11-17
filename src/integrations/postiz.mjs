@@ -66,7 +66,7 @@ export function createPostizReader({ transport, clock = () => new Date().toISOSt
     return (await listPosts({ window })).find(post => post.id === id) ?? null
   }
   const readMetrics = async ({ postId, days, appId, creativeRevision } = {}) => {
-    if (typeof postId !== 'string' || !postId || !Number.isInteger(days) || days < 1 || days > 365 || typeof appId !== 'string' || !appId || !Number.isSafeInteger(creativeRevision) || creativeRevision < 0) throw new TypeError('valid post and metric scope are required')
+    if (typeof postId !== 'string' || !postId || !Number.isInteger(days) || days < 1 || days > 365 || typeof appId !== 'string' || !appId || !(creativeRevision === null || (Number.isSafeInteger(creativeRevision) && creativeRevision >= 0))) throw new TypeError('valid post and metric scope are required')
     const key = `${postId}:${days}:${appId}:${creativeRevision}`
     try {
       const value = await request(`/analytics/post/${encodeURIComponent(postId)}`, { date: days })
@@ -78,7 +78,7 @@ export function createPostizReader({ transport, clock = () => new Date().toISOSt
           if (!object(bucket) || !isoDay(bucket.date)) throw Object.assign(new Error('Invalid metric date bucket'), { code: 'unavailable' })
           const numeric = typeof bucket.total === 'string' && bucket.total.trim() !== '' ? Number(bucket.total) : typeof bucket.total === 'number' ? bucket.total : NaN
           const available = Number.isFinite(numeric)
-          observations.push({ source: 'postiz', postId, appId, creativeRevision, metric: metric.label, value: available ? numeric : null, denominator: null, windowStart: bucket.date, windowEnd: bucket.date, observedAt: clock(), status: available ? 'available' : 'unsupported', coverage: null, evidenceId: `postiz:${postId}:${metric.label}:${bucket.date}`, fixtureOnly: false })
+          observations.push({ source: 'postiz', postId, appId, creativeRevision, ...(creativeRevision === null ? { attribution: { status: 'unmapped' } } : {}), metric: metric.label, value: available ? numeric : null, denominator: null, windowStart: bucket.date, windowEnd: bucket.date, observedAt: clock(), status: available ? 'available' : 'unsupported', coverage: null, evidenceId: `postiz:${postId}:${metric.label}:${bucket.date}`, fixtureOnly: false })
         }
       }
       cachedMetrics.set(key, observations)
