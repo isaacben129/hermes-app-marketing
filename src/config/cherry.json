@@ -1,0 +1,19 @@
+{
+  "appId": "cherry",
+  "name": "Cherry",
+  "brand": {
+    "promise": "Practice social situations. Start small. Get better over time.",
+    "source": { "locator": "/opt/data/workspace/cherry/docs/brand-guidelines.md", "version": "2026-11-17" },
+    "tone": ["calm", "matter-of-fact", "supportive", "plain language"],
+    "avoidClaims": ["therapy", "cure", "heal", "guaranteed outcome", "fix", "transform"]
+  },
+  "configuration": {
+    "cta": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
+    "channel": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
+    "claims": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
+    "rights": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
+    "qualifiedEvent": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
+    "paidEvent": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
+    "privacyPolicy": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null }
+  }
+}
