@@ -44,10 +44,11 @@ class RendererServerTests(unittest.TestCase):
         cls.tmp.cleanup()
 
     def test_render_and_export_endpoints_round_trip(self):
+        raw = self.image_path.read_bytes()
         slide = {
             'headline': 'Synthetic image-led example',
             'body': 'Geometry fixture with overlay copy.',
-            'image_path': str(self.image_path),
+            'image_data_url': 'data:image/png;base64,' + base64.b64encode(raw).decode('ascii'),
             'image_sha256': self.digest,
             'source_ref': 'fixture://synthetic-server-image',
         }
@@ -88,14 +89,14 @@ class RendererServerTests(unittest.TestCase):
                 {
                     'headline': 'A recognizable moment',
                     'body': 'A useful next step, over an explicit synthetic image.',
-                    'image_path': str(self.image_path),
+                    'image_data_url': 'data:image/png;base64,' + base64.b64encode(self.image_path.read_bytes()).decode('ascii'),
                     'image_sha256': self.digest,
                     'source_ref': 'fixture://synthetic-server-image',
                 },
                 {
                     'headline': 'One practical change',
                     'body': 'An image-led second slide with ordered text.',
-                    'image_path': str(self.image_path),
+                    'image_data_url': 'data:image/png;base64,' + base64.b64encode(self.image_path.read_bytes()).decode('ascii'),
                     'image_sha256': self.digest,
                     'source_ref': 'fixture://synthetic-server-image',
                 },

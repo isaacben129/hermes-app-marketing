@@ -19,12 +19,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path != '/api/health': self.send_error(404); return
-        body=b'OK'; self.send_response(200); self._cors(); self.send_header('Content-Type','text/plain'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
+        body=json.dumps({'service':'marketing-renderer','protocol':2,'features':['image_data_url','zip-export'],'maxRequestBytes':MAX_REQUEST_BYTES}).encode()
+        self.send_response(200); self._cors(); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
 
     def do_POST(self):
         if self.path not in ('/api/render','/api/export'): self.send_error(404); return
         origin=self.headers.get('Origin')
-        if origin and origin not in ('file://','null') and not origin.startswith('http://127.0.0.1:'):
+        if origin != 'file://':
             self.send_error(403); return
         try:
             if self.headers.get('Transfer-Encoding'):
@@ -33,9 +34,13 @@ class Handler(BaseHTTPRequestHandler):
             if size <= 0 or size > MAX_REQUEST_BYTES: raise ValueError('Request must be between 1 byte and 64 MB.')
             payload=json.loads(self.rfile.read(size))
             if self.path == '/api/render':
+                if not isinstance(payload.get('slides'), list) or not 1 <= len(payload['slides']) <= 20:
+                    raise ValueError('Render must contain 1–20 slides.')
                 normalized = dict(payload)
                 normalized['slides'] = []
                 for number, original in enumerate(payload.get('slides') or [], 1):
+                    if not isinstance(original, dict) or not (original.get('image_data_url') or original.get('image_path')):
+                        raise ValueError(f'Slide {number} requires an image.')
                     slide = dict(original)
                     if 'image_data_url' in slide:
                         encoded = slide.pop('image_data_url')

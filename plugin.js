@@ -3,24 +3,43 @@ import React, { useEffect, useState } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
 
 const RENDERER_BASE = 'http://127.0.0.1:8765/api'
+const MAX_RENDER_REQUEST_BYTES = 64_000_000
 async function rendererPost(path, payload) {
+  const body = JSON.stringify(payload)
+  if (new TextEncoder().encode(body).byteLength > MAX_RENDER_REQUEST_BYTES) throw new Error('Renderer request exceeds the 64 MB limit.')
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 30000)
   try {
-    const response = await fetch(`${RENDERER_BASE}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal })
+    const response = await fetch(`${RENDERER_BASE}/${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, signal: controller.signal })
     const data = await response.json()
     if (!response.ok) throw new Error(data.error || 'Local renderer failed.')
     return data
   } finally { clearTimeout(timer) }
 }
+async function assertRendererProtocol() {
+  const response = await fetch(`${RENDERER_BASE}/health`, { signal: AbortSignal.timeout(1000) })
+  if (!response.ok) throw new Error('Local renderer health check failed.')
+  const health = await response.json()
+  if (health?.service !== 'marketing-renderer' || health.protocol !== 2 || !Array.isArray(health.features) || !health.features.includes('image_data_url') || !health.features.includes('zip-export') || health.maxRequestBytes !== 64000000) throw new Error('Local renderer protocol mismatch; update the renderer before continuing.')
+}
 async function renderSlideshow(payload) {
+  await assertRendererProtocol()
   const data = await rendererPost('render', payload)
   return { ...data, slides: data.slides.map(slide => ({ ...slide, png: Uint8Array.from(atob(slide.pngBase64), c => c.charCodeAt(0)) })) }
 }
 async function exportSlideshowZip(rendered, source = {}) {
   if (!rendered?.slides?.length) throw new Error('Render slides before exporting.')
-  const data = await rendererPost('export', { rendered: { ...rendered, slides: rendered.slides.map(slide => ({ ...slide, pngBase64: btoa(String.fromCharCode(...slide.png)) })) }, source })
+  await assertRendererProtocol()
+  const data = await rendererPost('export', { rendered: { ...rendered, slides: rendered.slides.map(slide => ({ ...slide, pngBase64: pngBase64(slide) })) }, source })
   return Uint8Array.from(atob(data.zipBase64), c => c.charCodeAt(0))
+}
+function pngBase64(slide) {
+  if (typeof slide.pngBase64 === 'string') return slide.pngBase64
+  const bytes = slide.png
+  if (!(bytes instanceof Uint8Array)) throw new TypeError('Rendered PNG bytes are unavailable.')
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  return btoa(binary)
 }
 
 const ROUTE = '/marketing-system'
@@ -48,6 +67,7 @@ function MarketingPage({ ctx }) {
   const [notice, setNotice] = useState('')
   const [dirty, setDirty] = useState(false)
   const [rendered, setRendered] = useState(null)
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0)
   const [renderError, setRenderError] = useState('')
   const dirtyRef = React.useRef(false)
   dirtyRef.current = dirty
@@ -91,8 +111,34 @@ function MarketingPage({ ctx }) {
   }
   const renderSlides = async () => {
     if (!selected?.slides?.length) return
-    try { setRendered(await renderSlideshow({ title: selected.title, slides: selected.slides, theme: 'neutral' })) }
+    const slides = selected.slides.map(slide => typeof slide === 'string' ? { headline: slide, body: '' } : ({ ...slide }))
+    if (slides.some(slide => !slide.headline?.trim() || !slide.body?.trim())) { setRenderError('Add a headline and body to every slide before rendering.'); return }
+    if (slides.some(slide => !slide.selectedImage?.dataUrl)) { setRenderError('Choose an image for each slide before rendering.'); return }
+    const payloadSlides = slides.map(({ headline, body, selectedImage }) => ({ headline, body, image_data_url: selectedImage.dataUrl, image_sha256: selectedImage.sha256, source_ref: selectedImage.sourceRef }))
+    try { setRendered(await renderSlideshow({ title: selected.title, slides: payloadSlides, theme: 'neutral' })); setActiveSlideIndex(0) }
     catch (error) { setRenderError(error.message || 'Render failed.') }
+  }
+  const selectSlideImage = async index => {
+    try {
+      if (!ctx.files?.requestFolder || !ctx.files?.list || !ctx.files?.readDataUrl) throw new Error('File selection is unavailable in this host.')
+      const grant = await ctx.files.requestFolder()
+      if (!grant?.ok || !grant.folder?.id) return
+      const listing = await ctx.files.list(grant.folder.id)
+      const entries = (listing?.entries || []).filter(entry => !entry.isDirectory)
+      if (!listing?.ok || !entries.length) throw new Error('The selected folder has no readable image files.')
+      const name = window.prompt('Image file name', entries[0].name)
+      if (name === null) return
+      const entry = entries.find(item => item.name === name || item.path === name)
+      if (!entry) throw new Error('Choose an image file from the selected folder.')
+      const data = await ctx.files.readDataUrl(grant.folder.id, entry.path)
+      if (!data?.ok || typeof data.url !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/.test(data.url)) throw new Error('The selected file is not a supported PNG, JPEG, or WebP image.')
+      if (data.url.length > 17 * 1024 * 1024) throw new Error('Selected image exceeds the 12 MB limit.')
+      const raw = Uint8Array.from(atob(data.url.slice(data.url.indexOf(',') + 1)), character => character.charCodeAt(0))
+      const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', raw)), byte => byte.toString(16).padStart(2, '0')).join('')
+      const slides = selected.slides.map(slide => typeof slide === 'string' ? { headline: slide, body: '' } : ({ ...slide }))
+      slides[index] = { ...slides[index], selectedImage: { dataUrl: data.url, sha256: digest, sourceRef: `user-folder://${grant.folder.id}/${entry.path}`, folderId: grant.folder.id, path: entry.path } }
+      updateDraft('slides', slides)
+    } catch (error) { setRenderError(error.message || 'Image selection failed.') }
   }
   const downloadPng = (slide, index) => {
     const url = URL.createObjectURL(new Blob([slide.png], { type: 'image/png' }))
@@ -102,6 +148,7 @@ function MarketingPage({ ctx }) {
   const generateCopy = () => {
     if (selected.slides.length && !window.confirm('Replace current slide copy? Saved versions remain available.')) return
     setRendered(null)
+    setActiveSlideIndex(0)
     updateDraft('slides', [
       'What is one next step you could write down?',
       'Fictional example: this app lets you write one next step.',
@@ -114,6 +161,7 @@ function MarketingPage({ ctx }) {
     setDrafts(drafts.map(item => item.id === selected.id ? { ...item, [field]: value, review: 'blocked', ...( ['slides', 'hypothesis', 'brief', 'hook', 'title'].includes(field) ? { claim: 'unreviewed', claimsApproval: 'unconfigured' } : {}) } : item))
     setDirty(true)
     setRendered(null)
+    setActiveSlideIndex(0)
   }
   const updateSlide = (index, value) => {
     const slides = [...selected.slides]
@@ -124,12 +172,14 @@ function MarketingPage({ ctx }) {
     const versioned = drafts.map(item => item.id === selected.id && item.source ? {
       ...item, versions: [...item.versions, { number: item.versions.length + 1, savedAt: new Date().toISOString(),
         title: item.title, source: { ...item.source }, brief: item.brief, hypothesis: item.hypothesis,
-        slides: [...item.slides], rights: item.rights, claim: item.claim, cta: item.cta,
+        slides: item.slides.map(slide => typeof slide === 'string' ? { headline: slide, body: '' } : ({ ...slide })), rights: item.rights, claim: item.claim, cta: item.cta,
         claimsApproval: item.claimsApproval, channels: [...item.channels], assets: [...item.assets], events: { ...item.events }, review: item.review }]
     } : item)
-    ctx.storage.set('drafts', versioned)
+    try { ctx.storage.set('drafts', versioned) }
+    catch (error) { setRenderError(error.message || 'Draft save failed.'); return }
     setDrafts(versioned)
     setDirty(false)
+    setRenderError('')
     setNotice('Draft saved in this Hermes plugin on this device.')
   }
   const createDraft = () => {
@@ -160,6 +210,7 @@ function MarketingPage({ ctx }) {
     if (dirty && !window.confirm('Discard unsaved draft changes?')) return
     if (dirty) setDrafts(ctx.storage.get('drafts', []))
     setRendered(null)
+    setActiveSlideIndex(0)
     setRenderError('')
     setNotice('')
     setSelectedId(null)
@@ -183,8 +234,8 @@ function MarketingPage({ ctx }) {
   const overview = jsxs(Fragment, { children: [titleNode, appTabs, jsx('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '9px' }, children: [metric('Qualified activations', 'Not connected'), metric('Paid conversions', 'Not connected'), metric('Attributable revenue', 'Not connected')] }), jsxs('section', { style: { display: 'grid', gap: '10px' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }, children: [jsxs('div', { children: [jsx('h2', { style: { margin: 0, fontSize: '1rem', fontWeight: 600 }, children: `${app} workspace drafts` }), jsx('div', { style: { ...MUTED, fontSize: '0.77rem', marginTop: '3px' }, children: `${cards.length} local drafts · no sample creatives` })] }), button('＋ Add app', addAppProfile, 'outline'), button('＋ New local draft', createDraft, 'secondary'), button('＋ Create pipeline concept', createPipelineConcept, 'secondary')] }), cards.length ? jsx('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', gap: '10px' }, children: cards.map(sampleCard) }) : jsx(EmptyState, { title: 'Cherry workspace ready to configure', description: 'Create a local draft. No claims, CTA, channel, creative, or outcome is assumed.' })] })] })
   let detail = null
   if (selected) {
-    const slideNodes = selected.slides.length ? jsx('ol', { style: { display: 'grid', gap: '7px', margin: 0, paddingLeft: '23px' }, children: selected.slides.map((slide, index) => jsx('li', { style: { padding: '5px 2px' }, children: selected.isDraft ? jsx('textarea', { 'aria-label': `Slide ${index + 1}`, value: slide, rows: 2, onChange: event => updateSlide(index, event.target.value), style: { ...fieldStyle, width: '100%', resize: 'vertical' } }) : slide }, `${selected.id}-${index}`)) }) : jsx('div', { style: MUTED, children: 'No slides yet. Add a slide to start this draft.' })
-    const editor = jsxs('section', { style: { ...PANEL, display: 'grid', gap: '11px', padding: '14px' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }, children: [jsx('h2', { style: { margin: 0, fontSize: '1rem' }, children: 'Slideshow details' }), selected.isDraft ? jsxs('div', { style: { display: 'flex', gap: '7px' }, children: [button(dirty ? 'Save draft' : 'Saved', saveDraft, 'secondary', !dirty), button('Delete draft', deleteDraft, 'outline')] }) : badge('Read-only sample')] }), selected.isDraft ? jsx('label', { style: fieldLabel, children: ['Draft title', jsx('input', { 'aria-label': 'Draft title', value: selected.title, onChange: event => updateDraft('title', event.target.value), style: fieldStyle })] }) : jsx('div', { children: selected.title }), selected.isDraft ? jsx('label', { style: fieldLabel, children: ['Opening hook', jsx('textarea', { 'aria-label': 'Opening hook', value: selected.hook, rows: 3, onChange: event => updateDraft('hook', event.target.value), style: { ...fieldStyle, resize: 'vertical' } })] }) : jsx('div', { style: MUTED, children: selected.hook }), jsx('div', { style: { color: 'var(--ui-text-secondary)', fontSize: '0.78rem', textTransform: 'uppercase' }, children: 'Ordered slides' }), slideNodes, selected.isDraft ? jsxs('div', { style: { display: 'flex', gap: '7px', flexWrap: 'wrap' }, children: [button('＋ Add slide', () => updateDraft('slides', [...selected.slides, '']), 'outline'), selected.slides.length ? button('Remove last slide', () => updateDraft('slides', selected.slides.slice(0, -1)), 'outline') : null] }) : null] })
+    const slideNodes = selected.slides.length ? jsx('ol', { style: { display: 'grid', gap: '7px', margin: 0, paddingLeft: '23px' }, children: selected.slides.map((slide, index) => { const current = typeof slide === 'string' ? { headline: slide, body: '' } : slide; return jsx('li', { style: { padding: '5px 2px' }, children: selected.isDraft ? jsxs('div', { style: { display: 'grid', gap: '6px' }, children: [jsx('input', { 'aria-label': `Slide ${index + 1} headline`, value: current.headline, onChange: event => updateSlide(index, { ...current, headline: event.target.value }), style: fieldStyle }), jsx('textarea', { 'aria-label': `Slide ${index + 1} body`, value: current.body, rows: 2, onChange: event => updateSlide(index, { ...current, body: event.target.value }), style: { ...fieldStyle, width: '100%', resize: 'vertical' } }), button(current.selectedImage ? `Change image for slide ${index + 1}` : `Choose image for slide ${index + 1}`, () => selectSlideImage(index), 'outline')] }) : current.headline }, `${selected.id}-${index}`) }) }) : jsx('div', { style: MUTED, children: 'No slides yet. Add a slide to start this draft.' })
+    const editor = jsxs('section', { style: { ...PANEL, display: 'grid', gap: '11px', padding: '14px' }, children: [jsxs('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }, children: [jsx('h2', { style: { margin: 0, fontSize: '1rem' }, children: 'Slideshow details' }), selected.isDraft ? jsxs('div', { style: { display: 'flex', gap: '7px' }, children: [button(dirty ? 'Save draft' : 'Saved', saveDraft, 'secondary', !dirty), button('Delete draft', deleteDraft, 'outline')] }) : badge('Read-only sample')] }), selected.isDraft ? jsx('label', { style: fieldLabel, children: ['Draft title', jsx('input', { 'aria-label': 'Draft title', value: selected.title, onChange: event => updateDraft('title', event.target.value), style: fieldStyle })] }) : jsx('div', { children: selected.title }), selected.isDraft ? jsx('label', { style: fieldLabel, children: ['Opening hook', jsx('textarea', { 'aria-label': 'Opening hook', value: selected.hook, rows: 3, onChange: event => updateDraft('hook', event.target.value), style: { ...fieldStyle, resize: 'vertical' } })] }) : jsx('div', { style: MUTED, children: selected.hook }), jsx('div', { style: { color: 'var(--ui-text-secondary)', fontSize: '0.78rem', textTransform: 'uppercase' }, children: 'Ordered slides' }), slideNodes, selected.isDraft ? jsxs('div', { style: { display: 'flex', gap: '7px', flexWrap: 'wrap' }, children: [button('＋ Add slide', () => updateDraft('slides', [...selected.slides, { headline: '', body: '' }]), 'outline'), selected.slides.length ? button('Remove last slide', () => updateDraft('slides', selected.slides.slice(0, -1)), 'outline') : null] }) : null] })
     const input = (label, value, onChange) => jsx('label', { style: fieldLabel, children: [label, jsx('textarea', { 'aria-label': label, value, onChange: e => onChange(e.target.value), style: fieldStyle })] })
     const pipeline = jsxs('section', { style: { ...PANEL, padding: '14px', display: 'grid', gap: '10px' }, children: [
       jsx('h2', { children: `${selected.app} starter configuration` }),
@@ -194,9 +245,9 @@ function MarketingPage({ ctx }) {
       input('Working hypothesis (unvalidated)', selected.hypothesis, value => updateDraft('hypothesis', value)),
       jsx('div', { children: 'CTA: unconfigured · Channels: unconfigured · Assets / rights: unconfigured · Claim approval: unconfigured · Events / privacy: unconfigured' }),
       jsx('div', { children: 'Status values are local workspace data only. They do not represent rights clearance, claims approval, privacy review, or permission to distribute.' }),
-      button('Render slides', renderSlides, 'secondary', !selected.slides.length),
+      button('Render slideshow', renderSlides, 'secondary', !selected.slides.length),
       renderError ? jsx('div', { role: 'alert', children: renderError }) : null,
-      rendered ? jsxs('section', { style: { display: 'grid', gap: '10px' }, children: [jsx('h3', { children: `Rendered preview · ${rendered.dimensions.width} × ${rendered.dimensions.height}` }), button('Download slide 1 PNG', () => downloadPng(rendered.slides[0], 0), 'outline'), ...rendered.slides.map((slide, index) => jsxs('figure', { style: { ...PANEL, padding: '10px' }, children: [jsx('img', { src: `data:image/png;base64,${btoa(String.fromCharCode(...slide.png))}`, alt: `Rendered slide ${index + 1}`, style: { display: 'block', width: 'min(100%, 360px)', height: 'auto' } }), button(`Download slide ${index + 1} PNG`, () => downloadPng(slide, index), 'outline')] }, index))] }) : null,
+      rendered ? jsxs('section', { style: { display: 'grid', gap: '10px' }, children: [jsx('h3', { children: `Slide ${activeSlideIndex + 1} of ${rendered.slides.length} · ${rendered.dimensions.width} × ${rendered.dimensions.height}` }), jsx('img', { src: `data:image/png;base64,${pngBase64(rendered.slides[activeSlideIndex])}`, alt: `Rendered slide ${activeSlideIndex + 1}`, style: { display: 'block', height: 'min(62vh, 720px)', maxWidth: '100%', objectFit: 'contain', objectPosition: 'left center' } }), jsx('div', { role: 'list', 'aria-label': 'Rendered slides', style: { display: 'flex', gap: '8px', overflowX: 'auto' }, children: rendered.slides.map((slide, index) => jsx('button', { type: 'button', 'aria-label': `Show slide ${index + 1}`, 'aria-current': index === activeSlideIndex ? 'true' : undefined, onClick: () => setActiveSlideIndex(index), style: { width: '52px', height: '92px', flex: '0 0 auto', padding: 0 }, children: jsx('img', { src: `data:image/png;base64,${pngBase64(slide)}`, alt: '' }) }, index)) }), button('Export slideshow ZIP', async () => { try { const bytes = await exportSlideshowZip(rendered, { title: selected.title }); const url = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' })); const link = document.createElement('a'); link.href = url; link.download = 'slideshow.zip'; link.click(); URL.revokeObjectURL(url) } catch (error) { setRenderError(error.message || 'Export failed.') } }, 'outline')] }) : null,
       ...selected.slides.slice(1).map((_, index) => button(`Move slide ${index + 2} up`, () => {
         const slides = [...selected.slides]; [slides[index], slides[index + 1]] = [slides[index + 1], slides[index]]; updateDraft('slides', slides)
       })),

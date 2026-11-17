@@ -12,6 +12,9 @@
   },
   "keywords": [],
   "devDependencies": {
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "esbuild": "0.28.2",
+    "react": "19.3.0",
+    "react-test-renderer": "19.3.0"
   }
 }
