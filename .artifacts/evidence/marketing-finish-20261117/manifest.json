@@ -1,0 +1,51 @@
+{
+  "branch": "integration/marketing-completion-20261117",
+  "commit": "b16d32cc05ce63375e7b41256a3db320fc368444",
+  "working_tree": "clean; local integration only",
+  "environment": {
+    "date": "2026-11-17",
+    "node": "v26.12.1",
+    "python": "/opt/hermes/.venv/bin/python",
+    "host": "WSL",
+    "native_hermes_desktop": "unverified"
+  },
+  "assertions": [
+    {"id":"local-end-to-end-service-render-export","status":"passed","artifact":"fresh npm test 97/97; service E2E ZIP 12,233 bytes; registered UI ZIP 29,389 bytes; Python unittest 19/19; npm run build; plugin smoke 3/3; pipeline 3/3; exact plugin mirror cmp; direct generated-image 1080×1920 PNG and SHA-verified ZIP","scope":"local handlers, React harness and Pillow renderer; generated image's direct renderer path bypassed service workflow"},
+    {"id":"local-ui-browser-preview","status":"passed","artifact":"http://127.0.0.1:8766 HTML and JS 200; browser QA rendered Cherry overview/settings and explicit disconnected metrics","scope":"SDK shim; not native Hermes host"},
+    {"id":"service-cors-origin-hardening","status":"passed","artifact":"tests/service.test.mjs 4/4; missing/hostile Origin blocked; explicit opaque Origin exercised; Host restricted to 127.0.0.1/localhost/[::1] at the exact bound port","scope":"loopback listener; native Desktop origin/load still unverified"},
+    {"id":"ephemeral-service-renderer-port-startup","status":"passed","artifact":"startLocal(servicePort:0,rendererPort:0) returned live service; health renderer=healthy; npm start:local real launcher smoke HTTP 200 and removed connection file on shutdown","scope":"local lifecycle; no native app loader proof"},
+    {"id":"plugin-package-build-parity","status":"passed","artifact":"npm run build; plugin smoke; pipeline; syntax; worktree plugin.js, desktop/plugin.js, desktop-plugins/marketing-system/plugin.js SHA-256 all 3a8d3ecbb7f8f56eb539a25afded1b46f42f49c893457ce0944aeb24db641247","scope":"package mirrors only; installed /opt/data/desktop-plugins/marketing-system/plugin.js differs (SHA-256 0598de088a634bc410f9e280d76ce063fab325b5d69f5ed3ab09b156f6d94c70); no native installation/approval"},
+    {"id":"installed-package-parity-and-native-host","status":"blocked","artifact":"Worktree build mirrors match at SHA-256 3a8d3ecbb7f8f56eb539a25afded1b46f42f49c893457ce0944aeb24db641247; /opt/data/desktop-plugins/marketing-system/plugin.js differs at SHA-256 0598de088a634bc410f9e280d76ce063fab325b5d69f5ed3ab09b156f6d94c70; /mnt/c/Users/isaac/AppData/Local/hermes/... candidate missing; native CDP unavailable","scope":"Do not overwrite installed package without authorization; no exact native host version/load evidence"},
+    {"id":"native-desktop-install-load-and-visual-flow","status":"blocked","artifact":"127.0.0.1:9222 refused; desktop preview target showed chrome-error; browser shim not counted","scope":"Windows/native host not accessible"},
+    {"id":"postiz-live-read-only-capability","status":"partial","artifact":"MCP groupList returned []; integrationList returned 3 integrations including Cherry-named TikTok integration cmrb2tjm80001ow6vkzhk1yg9; no post or metric rows available through connected MCP tools; official docs confirm GET /posts and GET /analytics/post/{postId}","scope":"no configured env POSTIZ_API_KEY/POSTIZ_BASE_URL; local reader unconfigured; no live post/metric read"},
+    {"id":"real-cherry-rights-claims-channel-events-and-attribution","status":"blocked","artifact":"src/config/cherry.json","scope":"CTA, channel, claims, rights, qualified/paid events, privacy remain unconfigured; no approved outcome source"},
+    {"id":"real-mature-experiment-decision","status":"blocked","artifact":"tests/experiments.test.mjs","scope":"Correct supported result remains inconclusive until approved data/window/policy"},
+    {"id":"image-generation-supported-request","status":"passed","artifact":"Hermes image_generate returned request ID 10d1e4bd-62db-46ce-820b-83cb2f33a0a3; output /opt/data/cache/generated/images/openai_codex_gpt-image-2-medium_20261117_154941_6c15c12f.png; PNG 941x1672; SHA-256 41cb650a1c4efad0f11bf84ee0c5416bacc820e38282fc48907529f934edaf21; vision-inspected","scope":"operator-assisted, draft-only; image rights and campaign use remain unapproved"},
+    {"id":"generated-image-local-save-and-render-export","status":"passed","artifact":"full service actions workflow: actual Hermes generated asset saved as Cherry draft revision 1, service render job actual-image-flow produced a 1080x1920 PNG 2,231,005 bytes, service ZIP /opt/data/cache/scratch/cherry-generated-image-full-workflow.zip 2,232,174 bytes; ZIP reopened successfully, includes slide-01.png and source manifest; source_ref and original input SHA-256 preserved","scope":"local-only draft proof; app review, rights, human approvals, native Desktop, Postiz and publication not performed"},
+    {"id":"DarkUGC-10-record-audit","status":"deferred","artifact":"original plan Task 19; per prior system decision audit follows system","scope":"source access/rights not authorized/established"},
+    {"id":"Postiz-draft-write","status":"not_authorized","artifact":"original plan Task 19","scope":"external write not explicitly authorized"},
+    {"id":"push-pr-merge-deploy-schedule-publish","status":"not_authorized","artifact":"original plan constraints","scope":"canonical main unchanged; no external action"}
+  ],
+  "local_tests": {
+    "node": "97 passed, 0 failed, 0 skipped",
+    "python": "19 passed, OK",
+    "build": "passed",
+    "plugin_smoke": "3 passed",
+    "pipeline": "3 passed",
+    "origin_specific": "4 passed",
+    "lifecycle_specific": "4 passed",
+    "start:local_script": "node scripts/start-local.mjs; fresh smoke verified health HTTP 200 with renderer healthy and clean SIGTERM removed connection file"
+  },
+  "working_tree_changes": ["README.md", "docs/postiz-capabilities.md", "package.json", "preview/app.js", "src/ops/runbook.md", "src/service/lifecycle.mjs", "src/service/server.mjs", "tests/lifecycle.test.mjs", "tests/service.test.mjs", "../../.hermes/plans/2026-11-17_052651-hermes-marketing-finish-today.md", ".artifacts/evidence/marketing-finish-20261117/manifest.json", ".artifacts/evidence/marketing-finish-20261117/supplement.md", ".artifacts/evidence/marketing-finish-20261117/assertions.md"],
+  "untracked_test_runtime_artifact": null,
+  "evidence_limitations": [
+    "Reported commit is the verified code integration SHA; evidence bundle updates remain uncommitted and local-only.",
+    "Generated-image local pipeline discrepancy was reproduced then resolved by successful fresh saved-revision render/export through service action using the same generated image; the earlier failed service attempt remains unexplained but is superseded by the successful full workflow.",
+    "Independent audit directly checked this exact continuation worktree. Worktree mirrors match each other, but separately installed plugin differs; no native host is available for verification.",
+    "No live Cherry campaign used approved assets or human clearances.",
+    "Generated image saved/rendered/exported through local service action successfully using same image; prior failure from earlier attempt is superseded by fresh full workflow evidence.",
+    "A separate Cherry source worktree contains a weekly funnel document naming practice_complete, purchase_completed, and campaign/hook/source fields, but it explicitly says campaign attribution is not yet populated and Firebase/BigQuery export is manual; definitions are not yet approved for this system.",
+    "DarkUGC official endpoint is documented but not installed/authorized in the active session; no source audit performed.",
+    "service render API accepts the canonical 127.0.0.1:<port> Host header and rejects localhost alias due strict authority comparison; runbook documents canonical connection.json URL and this known URL-input mismatch."
+  ]
+}
