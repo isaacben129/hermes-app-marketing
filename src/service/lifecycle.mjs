@@ -46,7 +46,7 @@ export async function startLocal({ dataDir = process.env.HERMES_MARKETING_DATA_D
   const artifacts = new RenderArtifacts({ dataDir })
   let postizReader = null
   try { postizReader = createDefaultPostizReader() } catch { /* invalid provider configuration remains unavailable */ }
-  const actions = createActions({ workspace, ledger, runner, renderer, artifacts, postizReader })
+  const actions = createActions({ workspace, ledger, runner, renderer, artifacts, postizReader, python })
   const server = createService({ actions, token, allowedOrigin })
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(servicePort, '127.0.0.1', resolve) }) }
   catch (error) { if (child) await stopChild(child); throw error }
