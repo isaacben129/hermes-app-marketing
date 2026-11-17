@@ -7,7 +7,7 @@ import { recommendExperiment } from '../domain/experiments.mjs'
 import { normalizeOutcomeRows } from '../integrations/outcomes.mjs'
 import sourceEvidence from '../domain/source-evidence.cjs'
 
-const reviewContent = value => { const copy = structuredClone(value); for (const key of ['quality', 'readiness', 'generatedAssets']) delete copy[key]; return copy }
+const reviewContent = value => { const copy = structuredClone(value); for (const key of ['quality', 'readiness', 'generatedAssets', 'qualityReviews']) delete copy[key]; return copy }
 const contentHash = value => crypto.createHash('sha256').update(JSON.stringify(reviewContent(value))).digest('hex')
 const safeId = value => typeof value === 'string' && /^[A-Za-z0-9_-]+$/.test(value) && !value.includes('..')
 const safeApp = value => typeof value === 'string' && value === value.trim() && /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,99}$/u.test(value)
