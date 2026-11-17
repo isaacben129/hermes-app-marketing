@@ -39,7 +39,18 @@ test('registered UI uses live HTTP service through save, readback, render, previ
       await click(`Choose native image for slide ${i+1}`)
     }
     await click('Save to service'); for (let i=0;i<100 && !renderer.root.findAllByProps({role:'status'}).some(x=>x.children.join('').includes('Saved and verified'));i++) await new Promise(r=>setTimeout(r,20)); await act(async()=>{}); await click('Overview');
-    await click('Untitled Cherry draft · draft · Open')
+    const allButtons = renderer.root.findAllByType('button')
+    const getText = (node) => {
+      if (!node) return ''
+      if (typeof node === 'string') return node
+      if (Array.isArray(node)) return node.map(getText).join('')
+      if (node.props && node.props.children) return getText(node.props.children)
+      if (node.children) return getText(node.children)
+      return ''
+    }
+    const draftBtn = allButtons.find(node => getText(node).includes('Untitled Cherry draft'))
+    assert.ok(draftBtn, 'missing draft button')
+    await act(async () => { await draftBtn.props.onClick(); await tick() })
     const reopenedBody = renderer.root.findAllByType('textarea').find(x => x.props['aria-label'] === 'Slide 1 body'); await act(async () => reopenedBody.props.onChange({ target: { value: 'Body 1 revised after readback' } })); await click('Save to service'); for (let i=0;i<100 && !renderer.root.findAllByProps({role:'status'}).some(x=>x.children.join('').includes('Saved and verified'));i++) await new Promise(r=>setTimeout(r,20)); await act(async()=>{})
     const ws = await (await fetch(`${values.get('serviceUrl')}/api/workspace?app=Cherry`, { headers: { Authorization: `Bearer ${service.token}`, Origin: 'null' } })).json(); assert.equal(ws.drafts[0].slides.length, 2); assert.ok(ws.drafts[0].slides.every(slide => /^image:[a-f0-9]{64}$/.test(slide.selectedImage.contentRef))); await click('Render saved revision')
     const jobResponse = await fetch(`${values.get('serviceUrl')}/api/jobs` , { headers: { Authorization: `Bearer ${service.token}` } }); const jobs = await jobResponse.json()
