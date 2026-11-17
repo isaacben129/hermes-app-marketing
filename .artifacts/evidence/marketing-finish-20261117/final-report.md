@@ -1,7 +1,7 @@
 # Local completion evidence · 2026-11-17
 
 ## Result
-Local implementation work is complete at `integration/marketing-completion-20261117`, commit `01e3ed1497dc84bb2f841172294bc058225f2a67`. The branch is clean and remains local; canonical `main` was not modified. The app-agnostic workflow supports durable scoped drafts/revisions, evidence-bound review, real local rendering and ZIP export, explicit unavailable/inconclusive states, read-only Postiz interfaces, and fail-closed outcome/experiment handling. System Health now surfaces queued, running and failed job counts.
+Local implementation is complete at `integration/marketing-completion-20261117`, HEAD `10e460f2c4a5d32dc972b4b078eb3512af3b780f` (local branch only; canonical `main` unchanged). It includes durable scoped drafts/revisions, evidence-linked review, local rendering and ZIP export, fail-closed outcome/experiment states, read-only Postiz interfaces, and queued/running/failed job counts in System Health.
 
 ## Verified on this commit
 - `npm test`: 97/97 passing.
@@ -15,13 +15,14 @@ Local implementation work is complete at `integration/marketing-completion-20261
 - `git diff --check`: passed; worktree clean.
 - Built package mirrors `plugin.js`, `desktop/plugin.js`, and `desktop-plugins/marketing-system/plugin.js` all SHA-256 `56c0283623b8f624edb6860892eaa80f178329395fde3309a07f26f18776da3c` after adding System Health queue counts.
 
-## Still open — not safely executable without more access or authorization
-1. **Native Desktop acceptance:** separately installed `/opt/data/desktop-plugins/marketing-system/plugin.js` is still older/different, SHA-256 `0598de088a634bc410f9e280d76ce063fab325b5d69f5ed3ab09b156f6d94c70`. No native host/CDP (`127.0.0.1:9222` refused); no reload/load verification. Do not overwrite it automatically.
-2. **Postiz live data:** account MCP lists three integrations, but its available calls do not expose historical posts/analytics; no configured local API key/base URL, posts or metrics have been read. No external writes were made.
-3. **Cherry readiness:** claims, asset rights, CTA, channels, privacy/event definitions, verified attribution and business-outcome windows require owner/source approval. Local evidence says attribution is not populated and export is manual. No candidate assumptions were adopted as approvals.
-4. **DarkUGC:** no relevant plugin found/installed; no source-video audit was performed.
-5. **Browser preview save issue:** browser-shim QA surfaced a draft-save error; automated registered-UI/service integration is green, but this does not substitute for native-host validation.
-7. **Local service URL aliases:** resolved in commit `b16d32cc05ce63375e7b41256a3db320fc368444`; `src/service/server.mjs` accepts only `127.0.0.1`, `localhost` or `[::1]` with the exact bound port. It remains bound to IPv4 loopback. Test `node --test tests/service.test.mjs` passed 4/4 and the fresh full suite passed 97/97.
+The entire system is **not yet native-Desktop verified**. The only host folder found is `/opt/data/desktop-plugins/marketing-system/plugin.js` (28,567 bytes; SHA-256 `0598de088a634bc410f9e280d76ce063fab325b5d69f5ed3ab09b156f6d94c70`); the tested build mirrors are a different bundled output (SHA-256 `56c0283623b8f624edb6860892eaa80f178329395fde3309a07f26f18776da3c`). Hermes docs say the native Desktop app reads the host's `desktop-plugins/<id>/plugin.js`, which is app-level rather than profile-scoped. This session found no running Desktop process, `127.0.0.1:9222` endpoint, or Desktop log to verify the installed copy's load state. The agent runtime is CLI in WSL; no Windows Desktop install path was found. I did not copy or install either file.
+
+## Remaining blockers
+1. **Postiz live data:** the available MCP methods list integrations but do not provide historical posts/analytics; local reader lacks configured API credentials/base URL. No post/metric rows read.
+2. **Cherry readiness:** claims, asset rights, CTA, channels, privacy/event definitions, verified attribution and business-outcome windows need owner/source approval. Candidate source notes attribution is not populated and export is manual.
+3. **DarkUGC:** not installed/authorized and no source-video audit performed.
+4. **Browser preview save issue:** browser-shim QA surfaced a draft-save error; automated registered-UI/service integration is green, but this does not substitute for native-host validation.
+5. **Local service URL aliases:** fixed in `b16d32c`; service now allows only `127.0.0.1`, `localhost`, `[::1]` at its exact port and remains bound to IPv4 loopback. Regression test passed 4/4.
 
 No publishing, scheduling, upload, OAuth/credential change, merge, push, PR, or deployment took place. One generated image and its successful local ZIP export remain draft-only; campaign rights/use are not cleared.
 
