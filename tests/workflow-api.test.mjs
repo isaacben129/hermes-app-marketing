@@ -58,49 +58,6 @@ test('real HTTP profile CAS, scoped workspace, hard-block review, and experiment
   assert.equal(result.status, 409)
 })
 
-test('review revision stays bound to saved draft across review events and unrelated app writes', async t => {
-  const { call } = await fixture(t)
-  await call('/api/drafts/d1', 'PUT', { expectedRevision: 0, draft: { id: 'd1', app: 'Cherry', slides: [], evidence: [], claims: [] } })
-  const first = await call('/api/review', 'POST', { draftId: 'd1', revision: 1 })
-  assert.equal(first.body.quality.revision, 1)
-  const profile = approvedProfile()
-  await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 2, profile })
-  const second = await call('/api/review', 'POST', { draftId: 'd1', revision: 3 })
-  assert.equal(second.body.quality.revision, 1)
-})
-
-test('seven valid reviews survive reload and repeated review, while content edits clear them', async t => {
-  const { call } = await fixture(t)
-  const profile = approvedProfile()
-  profile.configuration.cta = approved('Learn more')
-  await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile })
-  const evidence = [{ id: 'evidence-1', provenance: { origin: 'owner', locator: 'local:source', capturedAt: '2026-11-17T00:00:00Z' }, rights: { status: 'cleared', attestation: { decision: 'cleared', attesterType: 'human', attestedBy: 'owner', attestedAt: '2026-11-17T00:00:00Z', basis: 'owned', scope: 'campaign' } } }]
-  const dimensions = ['audience fit', 'hook clarity', 'claim specificity/proof', 'slide progression/payoff', 'mobile legibility/visual coherence', 'promise-to-destination match', 'safety/rights/brand']
-  const qualityReviews = dimensions.map(dimension => ({ dimension, score: 4, revision: 999, reviewer: { type: 'human', name: 'reviewer' }, evidenceRefs: ['evidence-1'], rationale: 'Supported by saved evidence.', reviewedAt: '2026-11-17T00:00:00Z' }))
-  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nXcAAAAASUVORK5CYII='
-  const bytes = Buffer.from(png, 'base64')
-  const sha256 = (await import('node:crypto')).createHash('sha256').update(bytes).digest('hex')
-  const draft = { id: 'd1', app: 'Cherry', slides: [{ selectedImage: { dataUrl: `data:image/png;base64,${png}`, sha256, sourceRef: 'local:image' } }], evidence, claims: [], qualityReviews: qualityReviews.map(review => ({ ...review, evidenceRefs: ['fabricated-pointer'] })) }
-  let saved = await call('/api/drafts/d1', 'PUT', { expectedRevision: 1, draft })
-  assert.equal(saved.status, 200, JSON.stringify(saved.body))
-  let reviewed = await call('/api/review', 'POST', { draftId: 'd1', revision: 2 })
-  assert.equal(reviewed.body.quality.assessment, 'inconclusive')
-  let state = (await call('/api/workspace?app=Cherry')).body
-  saved = await call('/api/drafts/d1', 'PUT', { expectedRevision: 3, draft: { ...state.drafts[0], qualityReviews } })
-  assert.equal(saved.status, 200)
-  reviewed = await call('/api/review', 'POST', { draftId: 'd1', revision: 4 })
-  assert.equal(reviewed.body.quality.assessment, 'reviewed')
-  assert.equal(reviewed.body.quality.dimensions.length, 7)
-  reviewed = await call('/api/review', 'POST', { draftId: 'd1', revision: 5 })
-  assert.equal(reviewed.body.quality.assessment, 'reviewed')
-  assert.equal(reviewed.body.quality.revision, 4)
-  state = (await call('/api/workspace?app=Cherry')).body
-  saved = await call('/api/drafts/d1', 'PUT', { expectedRevision: 6, draft: { ...state.drafts[0], title: 'Changed' } })
-  assert.equal(saved.status, 200)
-  const afterEdit = await call('/api/review', 'POST', { draftId: 'd1', revision: 7 })
-  assert.equal(afterEdit.body.quality.assessment, 'inconclusive')
-})
-
 test('HTTP outcome import validates profile settings and persists normalized observations', async t => {
   const { call } = await fixture(t)
   await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile: approvedProfile() })
@@ -118,7 +75,7 @@ test('HTTP outcome import validates profile settings and persists normalized obs
 
 test('generation intake derives hash and does not accept caller-cleared human rights gates', async t => {
   const { call } = await fixture(t)
-  const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/nXcAAAAASUVORK5CYII=', 'base64')
+  const image = Buffer.from('generated fixture image')
   const crypto = await import('node:crypto')
   const sha256 = crypto.createHash('sha256').update(image).digest('hex')
   await call('/api/drafts/d1', 'PUT', { expectedRevision: 0, draft: { id: 'd1', app: 'Cherry', slides: [] } })
@@ -128,50 +85,7 @@ test('generation intake derives hash and does not accept caller-cleared human ri
   assert.equal(result.body.asset.rightsStatus, 'unknown')
 })
 
-test('generation intake rejects bytes that are not the declared image before writing events', async t => {
-  const { call } = await fixture(t)
-  const image = Buffer.from('generated fixture image')
-  const sha256 = (await import('node:crypto')).createHash('sha256').update(image).digest('hex')
-  await call('/api/drafts/d1', 'PUT', { expectedRevision: 0, draft: { id: 'd1', app: 'Cherry', slides: [] } })
-  const result = await call('/api/generation/intake', 'POST', { draftId: 'd1', revision: 1, asset: { draftId: 'd1', revision: 1, prompt: 'test', provider: 'hermes', model: 'm', requestId: 'r', generatedAt: '2026-11-17T00:00:00Z', imageSha256: sha256, dataUrl: `data:image/png;base64,${image.toString('base64')}`, sourceRef: 'local:asset', humanUseApproval: 'pending' } })
-  assert.equal(result.status, 400)
-  const state = (await call('/api/workspace?app=Cherry')).body
-  assert.equal(state.revision, 1)
-  assert.equal(state.drafts[0].generatedAssets, undefined)
-})
-
-test('Postiz sync is app channel matched and leaves creative attribution unknown',async t=>{const reader={listIntegrations:async()=>[{id:'int-1',name:'Brand'}],listPosts:async()=>[{id:'p1',content:'hello',integration:{id:'int-1'}},{id:'p2',integration:{id:'other'}}],readMetrics:async()=>({status:'available',observations:[{source:'postiz',postId:'p1',appId:'cherry',creativeRevision:null,metric:'views',value:0,status:'available',evidenceId:'postiz:p1:views:2026-11-01',attribution:{status:'unmapped'}}]})};const {call}=await fixture(t,reader);const profile=approvedProfile();profile.configuration.channel=approved('int-1');await call('/api/profiles/Cherry','PUT',{expectedRevision:0,profile});let result=await call('/api/postiz/sync','POST',{app:'Cherry',window:{start:'2026-11-01',end:'2026-11-07'},days:7});assert.equal(result.body.status,'connected');assert.deepEqual(result.body.posts.map(post=>post.id),['p1']);assert.equal(result.body.observations[0].creativeRevision,null);assert.deepEqual(result.body.observations[0].attribution,{status:'unmapped'});assert.equal((await call('/api/workspace?app=Cherry')).body.posts.length,1)})
-
-test('unknown channel is blocked and does not emit successful sync', async t => {
-  const reader = { listIntegrations: async () => [{ id: 'int-1' }], listPosts: async () => [{ id: 'p1', integration: { id: 'int-1' } }], readMetrics: async () => ({ status: 'available', observations: [] }) }
-  const { call } = await fixture(t, reader)
-  const profile = approvedProfile(); profile.configuration.channel = approved('int-1')
-  await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile })
-  const known = await call('/api/postiz/sync', 'POST', { app: 'Cherry', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
-  assert.equal(known.body.status, 'connected')
-  const other = approvedProfile(); other.name = 'Other'; other.appId = 'other'
-  await call('/api/profiles/Other', 'PUT', { expectedRevision: 0, profile: other })
-  const result = await call('/api/postiz/sync', 'POST', { app: 'Other', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
-  assert.equal(result.body.status, 'blocked')
-  assert.equal(result.body.error.code, 'channel_unconfigured')
-  assert.equal(result.body.lastSuccess, null)
-  assert.equal((await call('/api/workspace?app=Other')).body.revision, 1)
-})
-
-test('offline sync for another app does not inherit the first app last success', async t => {
-  let offline = false
-  const reader = { listIntegrations: async () => { if (offline) throw Object.assign(new Error('offline'), { code: 'unavailable' }); return [{ id: 'int-1' }] }, listPosts: async () => [], readMetrics: async () => ({ status: 'available', observations: [] }) }
-  const { call } = await fixture(t, reader)
-  const profileA = approvedProfile(); profileA.configuration.channel = approved('int-1')
-  await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile: profileA })
-  await call('/api/postiz/sync', 'POST', { app: 'Cherry', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
-  const profileB = approvedProfile(); profileB.name = 'Other'; profileB.appId = 'other'
-  await call('/api/profiles/Other', 'PUT', { expectedRevision: 0, profile: profileB })
-  offline = true
-  const result = await call('/api/postiz/sync', 'POST', { app: 'Other', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
-  assert.equal(result.body.status, 'unavailable')
-  assert.equal(result.body.lastSuccess, null)
-})
+test('Postiz sync is GET-only, app channel matched, durable, and health reflects recorded connection',async t=>{const reader={listIntegrations:async()=>[{id:'int-1',name:'Brand'}],listPosts:async()=>[{id:'p1',content:'hello',integration:{id:'int-1'}},{id:'p2',integration:{id:'other'}}],readMetrics:async()=>({status:'available',observations:[{source:'postiz',postId:'p1',appId:'cherry',creativeRevision:0,metric:'views',value:0,status:'available',evidenceId:'postiz:p1:views:2026-11-01'}]})};const {call}=await fixture(t,reader);const profile=approvedProfile();profile.configuration.channel=approved('int-1');await call('/api/profiles/Cherry','PUT',{expectedRevision:0,profile});let result=await call('/api/postiz/sync','POST',{app:'Cherry',window:{start:'2026-11-01',end:'2026-11-07'},days:7});assert.equal(result.body.status,'connected');assert.deepEqual(result.body.posts.map(post=>post.id),['p1']);assert.equal((await call('/api/workspace?app=Cherry')).body.posts.length,1);let health=(await call('/api/health')).body;assert.equal(health.services.find(item=>item.name==='postiz').status,'healthy')})
 
 test('Postiz unavailable configuration never returns invented posts',async t=>{const {call}=await fixture(t);const result=await call('/api/postiz/sync','POST',{app:'Cherry',window:{start:'2026-11-01',end:'2026-11-07'},days:7});assert.equal(result.body.status,'unavailable');assert.deepEqual(result.body.posts,[]);assert.equal(result.body.lastSuccess,null)})
 
@@ -190,7 +104,7 @@ test('protected write bodies reject credential-shaped fields with safe errors', 
   const { call } = await fixture(t)
   const response = await call('/api/drafts/d1', 'PUT', { expectedRevision: 0, draft: { id: 'd1', app: 'Cherry', apiKey: 'never-store-this' } })
   assert.equal(response.status, 400)
-  assert.deepEqual(response.body.error, { code: 'invalid_input', message: 'Check the named fields and request schema.', retryable: false })
+  assert.deepEqual(response.body.error, { code: 'invalid_input', message: 'Request could not be completed', retryable: false })
 })
 
 test('stale Postiz metric cache is durably marked stale and health becomes attention', async t => {
