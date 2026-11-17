@@ -3,17 +3,164 @@
   "name": "Cherry",
   "brand": {
     "promise": "Practice social situations. Start small. Get better over time.",
-    "source": { "locator": "/opt/data/workspace/cherry/docs/brand-guidelines.md", "version": "aa65fe1984a785d0a303ded594faba0dd0dbd42e" },
-    "tone": ["calm", "matter-of-fact", "supportive", "plain language"],
-    "avoidClaims": ["therapy", "cure", "heal", "guaranteed outcome", "fix", "transform"]
+    "source": {
+      "locator": "/opt/data/workspace/cherry/docs/brand-guidelines.md",
+      "version": "aa65fe1984a785d0a303ded594faba0dd0dbd42e"
+    },
+    "tone": [
+      "calm",
+      "matter-of-fact",
+      "supportive",
+      "plain language"
+    ],
+    "avoidClaims": [
+      "therapy",
+      "cure",
+      "heal",
+      "guaranteed outcome",
+      "fix",
+      "transform"
+    ]
   },
   "configuration": {
-    "cta": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
-    "channel": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
-    "claims": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
-    "rights": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
-    "qualifiedEvent": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
-    "paidEvent": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null },
-    "privacyPolicy": { "value": null, "status": "unconfigured", "evidenceRef": null, "reviewer": null, "reviewedAt": null }
-  }
+    "cta": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "channel": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "claims": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "rights": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "qualifiedEvent": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "paidEvent": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "privacyPolicy": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    }
+  },
+  "status": "provisional",
+  "campaign": {
+    "audience": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "objective": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "cta": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "destination": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "channels": [],
+    "claims": [],
+    "assets": []
+  },
+  "measurement": {
+    "qualifiedEvent": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "paidEvent": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "privacyPolicy": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    },
+    "attribution": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null,
+      "notes": "Not populated in source; attribution cannot be claimed."
+    },
+    "outcomeWindowDays": {
+      "value": null,
+      "status": "unconfigured",
+      "evidenceRef": null,
+      "reviewer": null,
+      "reviewedAt": null
+    }
+  },
+  "provisionalEventCandidates": [
+    {
+      "name": "practice_complete",
+      "status": "candidate_unapproved",
+      "evidenceRef": "/opt/data/workspace/cherry-worktrees/forge-benchmark-home-20261026/operations/weekly-funnel.md"
+    },
+    {
+      "name": "purchase_completed",
+      "status": "candidate_unapproved",
+      "evidenceRef": "/opt/data/workspace/cherry-worktrees/forge-benchmark-home-20261026/operations/weekly-funnel.md"
+    }
+  ],
+  "notes": [
+    "Working configuration only; owner refinement and approval remain pending.",
+    "Located funnel source says attribution is not populated and Firebase/BigQuery export is manual.",
+    "No channel or integration ID is selected. A Cherry-named integration does not itself approve use.",
+    "Do not publish, schedule, upload, or treat draft assets as rights-cleared based on this config."
+  ]
 }
