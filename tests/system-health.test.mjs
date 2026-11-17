@@ -32,8 +32,14 @@ test('health uses explicit stale and unavailable states rather than invented liv
 })
 
 test('health view renders snapshot freshness and unavailable metrics', () => {
-  const output = flatten(SystemHealth({ snapshot: { observedAt: '2025-06-01T10:00:00.000Z', services: [{ name: 'Queue', status: 'healthy' }] }, now: '2025-06-01T10:00:30.000Z', metrics: { completed: null } }))
+  const output = flatten(SystemHealth({ snapshot: { observedAt: '2025-06-01T10:00:00.000Z', services: [{ name: 'Queue', status: 'healthy' }] }, now: '2025-06-01T10:00:30.000Z', metrics: { 'Unavailable metric': null, 'Queued jobs': 3, 'Running jobs': 1, 'Failed jobs': 2 } }))
   assert.ok(output.includes('Healthy'))
+  assert.ok(output.includes('Queued jobs'))
+  assert.ok(output.includes('3'))
+  assert.ok(output.includes('Running jobs'))
+  assert.ok(output.includes('1'))
+  assert.ok(output.includes('Failed jobs'))
+  assert.ok(output.includes('2'))
   assert.ok(output.includes('Last checked 2025-06-01T10:00:00.000Z'))
   assert.ok(output.includes('Queue'))
   assert.ok(output.includes('Unavailable'))

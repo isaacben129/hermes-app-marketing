@@ -473,7 +473,7 @@ function MarketingPage({ ctx }) {
       setError(e.message);
     }
   }, !connected || !profileText)));
-  else if (view === "System health") content = h3(Fragment, null, h3(SystemHealth, { snapshot: health, metrics: {}, onRetry: refreshHealth }), ...jobs.length ? jobs.map((item) => h3(JobDetail, { key: item.id, job: item, onRetry: (id) => item.status === "failed" && api(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }).then(refreshHealth).catch((e) => setError(e.message)) })) : [h3(JobDetail, { key: "empty", job: null })]);
+  else if (view === "System health") content = h3(Fragment, null, h3(SystemHealth, { snapshot: health, metrics: health?.jobs ? { "Queued jobs": health.jobs.queued, "Running jobs": health.jobs.running, "Failed jobs": health.jobs.failed } : {}, onRetry: refreshHealth }), ...jobs.length ? jobs.map((item) => h3(JobDetail, { key: item.id, job: item, onRetry: (id) => item.status === "failed" && api(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }).then(refreshHealth).catch((e) => setError(e.message)) })) : [h3(JobDetail, { key: "empty", job: null })]);
   else if (view === "Experiments") content = h3("section", { style: panel3 }, h3("h2", null, "Experiment recommendation"), input("Experiment policy and version (JSON)", experimentText, setExperimentText, true), input("Observations (JSON)", observationText, setObservationText, true), button("Recommend decision", async () => {
     try {
       const out = await api("/api/experiments/recommend", { method: "POST", body: JSON.stringify({ draftId: draft?.id, revision: workspace?.revision, experiment: JSON.parse(experimentText), observations: JSON.parse(observationText) }) });
