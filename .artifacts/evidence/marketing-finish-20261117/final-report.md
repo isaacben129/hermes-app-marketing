@@ -1,7 +1,7 @@
 # Local completion evidence · 2026-11-17
 
 ## Result
-Local implementation work is complete at `integration/marketing-completion-20261117`, commit `b16d32cc05ce63375e7b41256a3db320fc368444`. The branch is clean and remains local; canonical `main` was not modified. The app-agnostic workflow supports durable scoped drafts/revisions, evidence-bound review, real local rendering and ZIP export, explicit unavailable/inconclusive states, read-only Postiz interfaces, and fail-closed outcome/experiment handling.
+Local implementation work is complete at `integration/marketing-completion-20261117`, commit `01e3ed1497dc84bb2f841172294bc058225f2a67`. The branch is clean and remains local; canonical `main` was not modified. The app-agnostic workflow supports durable scoped drafts/revisions, evidence-bound review, real local rendering and ZIP export, explicit unavailable/inconclusive states, read-only Postiz interfaces, and fail-closed outcome/experiment handling. System Health now surfaces queued, running and failed job counts.
 
 ## Verified on this commit
 - `npm test`: 97/97 passing.
