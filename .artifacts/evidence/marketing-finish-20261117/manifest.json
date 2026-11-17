@@ -1,6 +1,6 @@
 {
   "branch": "integration/marketing-completion-20261117",
-  "commit": "05a917f5d26fba1ed6907780200dc5e0c5ddfc3f",
+  "commit": "582f98b456cb2a9665d6be70f5059459b2fab1c7",
   "working_tree": "clean; local integration only",
   "environment": {
     "date": "2026-11-17",
