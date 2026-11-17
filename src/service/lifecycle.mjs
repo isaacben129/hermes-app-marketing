@@ -12,7 +12,7 @@ import { RenderArtifacts } from './artifacts.mjs'
 import { createActions } from './actions.mjs'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-const handlerScript = `from http.server import HTTPServer\nfrom server import Handler\nclass ProtocolHandler(Handler):\n def do_GET(self):\n  if self.path == '/api/health':\n   body=b'{"protocol":2,"status":"ok"}'\n   self.send_response(200); self._cors(); self.send_header('Content-Type','application/json'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)\n  else: super().do_GET()\nHTTPServer(('127.0.0.1', int(__import__('sys').argv[1])), ProtocolHandler).serve_forever()`
+const handlerScript = `from http.server import HTTPServer\nfrom server import Handler\nHTTPServer(('127.0.0.1', int(__import__('sys').argv[1])), Handler).serve_forever()`
 
 export async function startLocal({ dataDir = process.env.HERMES_MARKETING_DATA_DIR, servicePort = 8764, rendererPort = 8765, allowedOrigin = 'null', python = process.env.PYTHON ?? 'python3', root = projectRoot, startupTimeoutMs = 10000 } = {}) {
   if (!dataDir || !path.isAbsolute(dataDir)) throw new Error('HERMES_MARKETING_DATA_DIR must be an absolute path')
@@ -24,11 +24,14 @@ export async function startLocal({ dataDir = process.env.HERMES_MARKETING_DATA_D
   catch (error) {
     if (error.code === 'protocol_mismatch') throw error
     child = spawn(python, ['-c', handlerScript, String(rendererPort)], { cwd: path.join(root, 'renderer'), stdio: 'ignore', env: { ...process.env, PYTHONPATH: path.join(root, 'renderer'), HERMES_MARKETING_RENDER_CACHE: path.join(dataDir, 'render-cache') } })
+    let spawnError = null
+    child.on('error', error => { spawnError = error })
     try {
       const deadline = Date.now() + startupTimeoutMs
       let ready = false
       while (Date.now() < deadline) {
-        if (child.exitCode !== null) throw new Error('Renderer child exited during startup')
+        if (spawnError) throw spawnError
+        if (child.exitCode !== null || child.signalCode !== null) throw new Error('Renderer child exited during startup')
         try { await renderer.health(); ready = true; break } catch (probeError) { if (probeError.code === 'protocol_mismatch') throw probeError }
         await new Promise(resolve => setTimeout(resolve, 100))
       }
@@ -45,8 +48,15 @@ export async function startLocal({ dataDir = process.env.HERMES_MARKETING_DATA_D
   try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(servicePort, '127.0.0.1', resolve) }) }
   catch (error) { if (child) await stopChild(child); throw error }
   const connection = path.join(dataDir, 'connection.json')
-  await fs.writeFile(connection, JSON.stringify({ url: `http://127.0.0.1:${server.address().port}`, token }), { mode: 0o600 })
-  await fs.chmod(connection, 0o600)
+  try {
+    await fs.writeFile(connection, JSON.stringify({ url: `http://127.0.0.1:${server.address().port}`, token }), { mode: 0o600 })
+    await fs.chmod(connection, 0o600)
+  } catch (error) {
+    await new Promise(resolve => server.close(resolve))
+    await fs.rm(connection, { force: true })
+    if (child) await stopChild(child)
+    throw error
+  }
   let stopped = false
   return {
     server, child, token, connection,

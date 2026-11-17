@@ -8,7 +8,13 @@ export class RendererClient {
     const response = await this.fetch(`${this.origin}/api/health`, { signal: AbortSignal.timeout(this.timeoutMs) })
     if (!response.ok) throw Object.assign(new Error('Renderer unavailable'), { code: 'unavailable' })
     const value = await response.json()
-    if (value.protocol !== 2) throw Object.assign(new Error('Renderer protocol mismatch'), { code: 'protocol_mismatch' })
+    const features = value.features
+    const supports = name => Array.isArray(features)
+      ? features.includes(name)
+      : features && typeof features === 'object' && features[name] === true
+    if (value.protocol !== 2 || !supports('render') || !supports('export')) {
+      throw Object.assign(new Error('Renderer protocol mismatch'), { code: 'protocol_mismatch' })
+    }
     return value
   }
   async #post(route, payload) {

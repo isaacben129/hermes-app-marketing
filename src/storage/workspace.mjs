@@ -5,6 +5,8 @@ import crypto from 'node:crypto'
 const empty = () => ({ revision: 0, profiles: [], drafts: [], observations: [], decisions: [] })
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex')
 const imageData = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024
+const safeId = value => typeof value === 'string' && /^[A-Za-z0-9_-]+$/.test(value) && !value.includes('..')
 
 export class WorkspaceStore {
   #ledger
@@ -13,6 +15,7 @@ export class WorkspaceStore {
 
   async #normalizeDraft(input) {
     const draft = structuredClone(input)
+    if (!safeId(draft.id)) throw new TypeError('Invalid draft id')
     const images = []
     for (const slide of draft.slides ?? []) {
       const image = slide.selectedImage
@@ -20,8 +23,10 @@ export class WorkspaceStore {
       if (typeof image.dataUrl !== 'string') throw new TypeError('Selected image data is required')
       const match = imageData.exec(image.dataUrl)
       if (!match) throw new TypeError('Invalid selected image data')
+      if (match[2].length > Math.ceil(MAX_IMAGE_BYTES / 3) * 4) throw new TypeError('Image data exceeds limit')
       const bytes = Buffer.from(match[2], 'base64')
-      if (bytes.length > 12 * 1024 * 1024) throw new TypeError('Image data exceeds limit')
+      if (bytes.toString('base64') !== match[2]) throw new TypeError('Invalid selected image data')
+      if (bytes.length > MAX_IMAGE_BYTES) throw new TypeError('Image data exceeds limit')
       const digest = hash(bytes)
       if (typeof image.sha256 !== 'string' || image.sha256 !== digest) throw new TypeError('Selected image SHA-256 mismatch')
       if (typeof image.sourceRef !== 'string' || !image.sourceRef) throw new TypeError('Selected image source reference is required')
@@ -29,7 +34,7 @@ export class WorkspaceStore {
       await fs.mkdir(dir, { recursive: true, mode: 0o700 })
       const file = path.join(dir, digest)
       try { await fs.writeFile(file, bytes, { flag: 'wx', mode: 0o600 }) }
-      catch (error) { if (error.code !== 'EEXIST') throw error }
+      catch (error) { if (error.code !== 'EEXIST') throw error; const existing = await fs.readFile(file); if (hash(existing) !== digest) throw new Error('Stored image integrity check failed') }
       image.contentRef = `image:${digest}`
       image.mimeType = `image/${match[1]}`
       delete image.dataUrl
@@ -90,14 +95,15 @@ export class WorkspaceStore {
     return draft ? this.#readDraft(draft) : null
   }
 
-  async rendererPayload(id) {
-    const draft = await this.findDraft(id)
+  async rendererPayload(source) {
+    const draft = typeof source === 'string' ? await this.findDraft(source) : source
     if (!draft) throw Object.assign(new Error('Draft missing'), { code: 'invalid_input' })
     if (!Array.isArray(draft.slides) || !draft.slides.length) throw Object.assign(new Error('Draft has no slides'), { code: 'invalid_input' })
     const slides = []
     for (const slide of draft.slides) {
       const image = slide.selectedImage
       if (!image?.contentRef || typeof image.sourceRef !== 'string' || !image.sourceRef) throw Object.assign(new Error('Slide image and source reference are required'), { code: 'invalid_input' })
+      if (!/^image:[a-f\d]{64}$/.test(image.contentRef)) throw Object.assign(new Error('Invalid stored image reference'), { code: 'invalid_input' })
       const bytes = await fs.readFile(path.join(this.#ledger.baseDir, 'images', image.contentRef.slice(6)))
       if (hash(bytes) !== image.sha256) throw Object.assign(new Error('Stored image integrity check failed'), { code: 'invalid_input' })
       const mime = image.mimeType?.replace('image/', '') ?? 'png'
