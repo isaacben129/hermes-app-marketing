@@ -16,7 +16,8 @@ function response(res, status, body, origin) {
 }
 
 function errorResponse(res, status, code, origin) {
-  response(res, status, { error: { code, message: 'Request could not be completed', retryable: retryableCodes.has(code) } }, origin)
+  const messages = { invalid_input: 'Check the named fields and request schema.', stale_revision: 'Reload the workspace and retry with its current revision.', persistence_failed: 'Local storage failed; retry after checking available disk space.', unavailable: 'The requested service is unavailable; retry after it recovers.', service_offline: 'The local service is unavailable; restart it and retry.', protocol_mismatch: 'The configured renderer protocol is unsupported.', render_failed: 'Rendering failed; correct the draft inputs and retry.', rate_limited: 'A request is already running; retry shortly.', provider_denied: 'The request was denied; check local authorization and configuration.' }
+  response(res, status, { error: { code, message: messages[code] ?? 'Request could not be completed safely.', retryable: retryableCodes.has(code) } }, origin)
 }
 
 function statusFor(error) {

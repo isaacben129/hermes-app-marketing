@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { validateAppProfile } from '../domain/profiles.mjs'
 import { evaluateQuality } from '../domain/quality.mjs'
 import { validateGeneratedAsset } from '../domain/generation.mjs'
@@ -6,7 +7,8 @@ import { recommendExperiment } from '../domain/experiments.mjs'
 import { normalizeOutcomeRows } from '../integrations/outcomes.mjs'
 import sourceEvidence from '../domain/source-evidence.cjs'
 
-const contentHash = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex')
+const reviewContent = value => { const copy = structuredClone(value); for (const key of ['quality', 'readiness', 'generatedAssets']) delete copy[key]; return copy }
+const contentHash = value => crypto.createHash('sha256').update(JSON.stringify(reviewContent(value))).digest('hex')
 const safeId = value => typeof value === 'string' && /^[A-Za-z0-9_-]+$/.test(value) && !value.includes('..')
 const safeApp = value => typeof value === 'string' && value === value.trim() && /^[\p{L}\p{N}][\p{L}\p{N} _-]{0,99}$/u.test(value)
 const validWindow = value => value && typeof value.start === 'string' && typeof value.end === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.start) && /^\d{4}-\d{2}-\d{2}$/.test(value.end) && Number.isFinite(Date.parse(`${value.start}T00:00:00Z`)) && Number.isFinite(Date.parse(`${value.end}T00:00:00Z`)) && value.start <= value.end && new Date(`${value.start}T00:00:00Z`).toISOString().slice(0, 10) === value.start && new Date(`${value.end}T00:00:00Z`).toISOString().slice(0, 10) === value.end
@@ -16,7 +18,7 @@ const hasCredentialField = value => Array.isArray(value)
     ? Object.entries(value).some(([key, nested]) => /token|secret|password|api.?key|authorization/i.test(key) || hasCredentialField(nested))
     : false
 
-export function createActions({ workspace, ledger, runner, renderer, artifacts, postizReader = null, clock = () => new Date().toISOString() }) {
+export function createActions({ workspace, ledger, runner, renderer, artifacts, postizReader = null, python = process.env.PYTHON ?? 'python3', clock = () => new Date().toISOString() }) {
   const retryResults = new Map()
   let postizLastSuccess = null
   const health = async () => {
@@ -89,10 +91,13 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
   return {
     health,
     workspace: app => { if (!safeApp(app)) throw Object.assign(new TypeError('app is required'), { code: 'invalid_input' }); return workspace.load(app) },
-    saveDraft: input => {
+    saveDraft: async input => {
       if (!safeApp(input?.draft?.app)) throw Object.assign(new TypeError('Draft app is invalid'), { code: 'invalid_input' })
       if (!Number.isSafeInteger(input?.expectedRevision) || input.expectedRevision < 0) throw Object.assign(new TypeError('expectedRevision is invalid'), { code: 'invalid_input' })
-      return workspace.saveDraft(input)
+      const existing = await workspace.findDraft(input.draft.id)
+      const draft = structuredClone(input.draft)
+      if (existing && contentHash(existing) !== contentHash(draft)) delete draft.qualityReviews
+      return workspace.saveDraft({ ...input, draft })
     },
     saveProfile: async ({ app, expectedRevision, profile }) => {
       const state = await requireWorkspaceRevision(app, expectedRevision)
@@ -123,7 +128,16 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
         unsupportedClaim: ['fact_without_evidence', 'invalid_evidence_pointer', 'evidence_pointer_unresolved', 'fact_evidence_invalid', 'claim_classification_unknown', 'invalid_claim_record'].some(code => blockerCodes.has(code)),
         unapprovedCta: !profile || profile.configuration?.cta?.status !== 'approved'
       }
-      const quality = evaluateQuality({ revision, reviews: Array.isArray(draft.qualityReviews) ? draft.qualityReviews : [], automatedChecks: checks })
+      const stableRevision = state.draftRevisions?.[draftId] ?? revision
+      const evidenceCounts = new Map()
+      for (const item of evidence) if (item?.id) evidenceCounts.set(item.id, (evidenceCounts.get(item.id) ?? 0) + 1)
+      const refs = new Set(evidence.filter(item => item?.id && evidenceCounts.get(item.id) === 1 && sourceEvidence.validateEvidenceRecord(item).length === 0).map(item => item.id))
+      for (const job of runner.list()) if (job.status === 'succeeded' && await artifacts.get?.(job.id)) refs.add(job.id)
+      const reviews = (Array.isArray(draft.qualityReviews) ? draft.qualityReviews : []).map(review => {
+        const evidenceRefs = (review.evidenceRefs ?? []).filter(ref => refs.has(ref))
+        return { ...review, revision: stableRevision, ...(review.score !== null && evidenceRefs.length !== (review.evidenceRefs ?? []).length ? { score: null, rationale: '', evidenceRefs: [] } : { evidenceRefs }) }
+      })
+      const quality = evaluateQuality({ revision: stableRevision, reviews, automatedChecks: checks })
       const contentHashValue = contentHash(draft)
       const newRevision = await persist('review.completed', draft.app, { draftId, contentHash: contentHashValue, readiness, quality }, state.revision)
       return { revision: newRevision, readiness, quality }
@@ -137,6 +151,10 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
       if (!match) throw Object.assign(new TypeError('Generated asset bytes are required'), { code: 'invalid_input' })
       const bytes = Buffer.from(match[2], 'base64')
       if (bytes.toString('base64') !== match[2] || bytes.length > 12 * 1024 * 1024) throw Object.assign(new TypeError('Invalid generated image data'), { code: 'invalid_input' })
+      const validation = spawnSync(python, ['-c', "import io,json,sys; from PIL import Image; im=Image.open(io.BytesIO(sys.stdin.buffer.read())); fmt=im.format; w,h=im.size; assert w>0 and h>0 and w*h<=40000000; im.load(); print(json.dumps({'format':fmt}))"], { input: bytes, encoding: 'utf8', timeout: 5000, maxBuffer: 1024 })
+      let imageInfo
+      try { if (validation.status !== 0 || validation.error) throw Error(); imageInfo = JSON.parse(validation.stdout) } catch { throw Object.assign(new TypeError('Generated image is invalid'), { code: 'invalid_input' }) }
+      if (imageInfo.format !== ({ png: 'PNG', jpeg: 'JPEG', webp: 'WEBP' }[match[1]])) throw Object.assign(new TypeError('Generated image format does not match declaration'), { code: 'invalid_input' })
       const actualSha256 = crypto.createHash('sha256').update(bytes).digest('hex')
       const normalized = validateGeneratedAsset(asset, { expectedRevision: revision, actualSha256 })
       normalized.contentRef = await workspace.storeGeneratedImage(bytes, actualSha256)
@@ -195,7 +213,7 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
       if (!postizReader) {
         try { await persist('postiz.sync_failed', app, { errorCode: 'unavailable', failedAt: clock() }, state.revision) } catch {}
         const staleState = await workspace.load(app)
-        const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced')?.payload?.syncedAt ?? null
+        const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced' && event.payload?.app === app)?.payload?.syncedAt ?? null
         return { status: 'unavailable', posts: staleState.posts ?? [], observations: (staleState.observations ?? []).filter(item => item.source === 'postiz'), lastSuccess, error: { code: 'unavailable' } }
       }
       try {
@@ -204,15 +222,19 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
         const channel = profile?.configuration?.channel
         const channelId = channel?.status === 'approved' ? (typeof channel.value === 'string' ? channel.value : channel.value?.integrationId) : null
         const integration = channelId && integrations.find(item => item.id === channelId && item.disabled !== true)
+        if (!integration) {
+          const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced' && event.payload?.app === app)?.payload?.syncedAt ?? null
+          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), lastSuccess, error: { code: channelId ? 'channel_unmatched' : 'channel_unconfigured' } }
+        }
         const matchedPosts = integration ? listedPosts.filter(post => post.integration?.id === integration.id) : []
         const posts = matchedPosts.map(post => ({ id: post.id, content: post.content, publishDate: post.publishDate, releaseURL: post.releaseURL, state: post.state, integration: post.integration, channelMatch: { status: 'matched', profileIntegrationId: integration.id, providerIntegrationId: post.integration.id }, syncedAt: clock() }))
         const observations = []
         let staleMetrics = false
         for (const post of posts) {
-          const metrics = await postizReader.readMetrics({ postId: post.id, days, appId: app.toLowerCase(), creativeRevision: 0 })
+          const metrics = await postizReader.readMetrics({ postId: post.id, days, appId: app.toLowerCase(), creativeRevision: null })
           if (metrics.status === 'unavailable') throw Object.assign(new Error('Postiz metrics unavailable'), { code: metrics.error?.code ?? 'unavailable' })
           if (metrics.status === 'stale') staleMetrics = true
-          if (metrics.status === 'available' || metrics.status === 'stale') observations.push(...metrics.observations.map(item => metrics.status === 'stale' ? { ...item, status: 'stale' } : item))
+          if (metrics.status === 'available' || metrics.status === 'stale') observations.push(...metrics.observations.map(item => ({ ...item, creativeRevision: Number.isSafeInteger(item.creativeRevision) && item.creativeRevision >= 0 ? item.creativeRevision : null, attribution: item.attribution ?? { status: 'unmapped' }, ...(metrics.status === 'stale' ? { status: 'stale' } : {}) })))
         }
         const unmatchedCount = listedPosts.length - matchedPosts.length
         const revision = await persist('postiz.synced', app, { posts, observations, unmatchedCount, syncedAt: clock(), degraded: staleMetrics }, state.revision)
@@ -222,7 +244,7 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
         const code = error.code ?? 'unavailable'
         try { await persist('postiz.sync_failed', app, { errorCode: code, failedAt: clock() }, state.revision) } catch {}
         const staleState = await workspace.load(app)
-        const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced')?.payload?.syncedAt ?? null
+        const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced' && event.payload?.app === app)?.payload?.syncedAt ?? null
         return { status: 'unavailable', posts: staleState.posts ?? [], observations: (staleState.observations ?? []).filter(item => item.source === 'postiz'), lastSuccess, error: { code } }
       }
     },

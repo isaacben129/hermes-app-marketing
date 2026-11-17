@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
 
-const empty = () => ({ revision: 0, profiles: [], drafts: [], observations: [], decisions: [], posts: [] })
+const empty = () => ({ revision: 0, profiles: [], drafts: [], observations: [], decisions: [], posts: [], draftRevisions: {} })
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex')
 const imageData = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
@@ -83,6 +83,7 @@ export class WorkspaceStore {
       const p = event.payload ?? {}
       if (event.type === 'draft.saved' && p.draft?.app === app) {
         state.revision++
+        state.draftRevisions[p.draft.id] = Number.isSafeInteger(p.parentRevision) ? p.parentRevision + 1 : state.revision
         const index = state.drafts.findIndex(draft => draft.id === p.draft.id)
         const draft = await this.#readDraft(p.draft)
         if (index < 0) state.drafts.push(draft); else state.drafts[index] = draft
@@ -94,7 +95,7 @@ export class WorkspaceStore {
       if (p.app === app && ['profile.saved', 'review.completed', 'generation.intake', 'experiment.recommended', 'observations.imported', 'postiz.synced', 'postiz.sync_failed'].includes(event.type)) {
         state.revision++
         if (event.type === 'profile.saved') state.profiles = [p.profile]
-        if (event.type === 'review.completed') state.drafts = state.drafts.map(draft => draft.id === p.draftId && hash(JSON.stringify(draft)) === p.contentHash ? { ...draft, quality: p.quality, readiness: p.readiness } : draft)
+        if (event.type === 'review.completed') state.drafts = state.drafts.map(draft => { const snapshot = structuredClone(draft); for (const key of ['quality', 'readiness', 'generatedAssets']) delete snapshot[key]; return draft.id === p.draftId && hash(JSON.stringify(snapshot)) === p.contentHash ? { ...draft, quality: p.quality, readiness: p.readiness } : draft })
         if (event.type === 'generation.intake') state.drafts = state.drafts.map(draft => draft.id === p.draftId ? { ...draft, generatedAssets: [...(draft.generatedAssets ?? []), p.asset] } : draft)
         if (event.type === 'experiment.recommended') state.decisions.push(p.decision)
         if (event.type === 'observations.imported') state.observations.push(...p.observations)
@@ -119,6 +120,7 @@ export class WorkspaceStore {
           state.profiles.push(...(part.profiles ?? []))
           for (const input of part.drafts ?? []) {
             const draft = await this.#readDraft(input)
+            state.draftRevisions[draft.id] = state.revision
             const index = state.drafts.findIndex(item => item.id === draft.id)
             if (index < 0) state.drafts.push(draft); else state.drafts[index] = draft
           }

@@ -9,7 +9,7 @@ const draft=(id,app='Cherry')=>({id,app,title:id,saved:true})
 test('workspace saves durable revisions and rejects stale concurrent saves', async()=>{
  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'workspace-'))
  try { const a=new WorkspaceStore({ledger:new EventLedger({baseDir:dir})}); const first=await a.saveDraft({draft:draft('d1'),expectedRevision:0});
- const b=new WorkspaceStore({ledger:new EventLedger({baseDir:dir})}); assert.deepEqual(await b.load('Cherry'),{revision:1,profiles:[],drafts:[first.draft],observations:[],decisions:[],posts:[]});
+ const b=new WorkspaceStore({ledger:new EventLedger({baseDir:dir})}); assert.deepEqual(await b.load('Cherry'),{revision:1,profiles:[],drafts:[first.draft],observations:[],decisions:[],posts:[],draftRevisions:{d1:1}});
  const results=await Promise.allSettled([a.saveDraft({draft:draft('d1'),expectedRevision:1}),b.saveDraft({draft:draft('d2'),expectedRevision:1})]); assert.equal(results.filter(x=>x.status==='fulfilled').length,1); assert.equal(results.filter(x=>x.status==='rejected').length,1)
  } finally {await fs.rm(dir,{recursive:true,force:true})}
 })
