@@ -27,27 +27,30 @@ function statusFor(error) {
 export function createService({ actions, token, allowedOrigin = 'null' }) {
   if (!actions || typeof token !== 'string' || !token) throw new TypeError('actions and token required')
   if (typeof allowedOrigin !== 'string' || !allowedOrigin) throw new TypeError('allowedOrigin must be an explicit origin string')
+  const allowOpaqueOrigin = allowedOrigin === 'null'
   let rendering = false
   return http.createServer(async (req, res) => {
     const origin = req.headers.origin
+    const originAllowed = origin === allowedOrigin || (allowOpaqueOrigin && origin === 'null')
     const corsOrigin = origin === allowedOrigin ? allowedOrigin : undefined
     const expectedHost = `127.0.0.1:${res.socket.localPort}`
     if (req.headers.host !== expectedHost) { errorResponse(res, 403, 'provider_denied', corsOrigin); return }
     if (req.method === 'OPTIONS') {
-      if (!corsOrigin) { errorResponse(res, 403, 'provider_denied'); return }
-      res.writeHead(204, { 'access-control-allow-origin': corsOrigin, vary: 'Origin', 'access-control-allow-methods': 'GET, PUT, POST, DELETE, OPTIONS', 'access-control-allow-headers': 'Authorization, Content-Type', 'access-control-max-age': '600' })
+      if (!originAllowed) { errorResponse(res, 403, 'provider_denied'); return }
+      res.writeHead(204, { ...(corsOrigin ? { 'access-control-allow-origin': corsOrigin, vary: 'Origin' } : {}), 'access-control-allow-methods': 'GET, PUT, POST, DELETE, OPTIONS', 'access-control-allow-headers': 'Authorization, Content-Type', 'access-control-max-age': '600' })
       res.end()
       return
     }
     const url = new URL(req.url, 'http://127.0.0.1')
     if (req.method === 'GET' && url.pathname === '/api/health') {
+      if (!originAllowed) { errorResponse(res, 403, 'provider_denied'); return }
       try {
         const value = await actions.health()
         response(res, 200, { version: value.version, observedAt: value.observedAt, services: value.services?.map(({ name, status, lastSuccess, error }) => ({ name, status, lastSuccess, error })) ?? [] }, corsOrigin)
       } catch { errorResponse(res, 503, 'unavailable', corsOrigin) }
       return
     }
-    if (!corsOrigin) { errorResponse(res, 403, 'provider_denied'); return }
+    if (!originAllowed) { errorResponse(res, 403, 'provider_denied'); return }
     if (req.headers.authorization !== `Bearer ${token}`) { errorResponse(res, 401, 'provider_denied', corsOrigin); return }
     let body = {}
     if (['POST', 'PUT', 'DELETE'].includes(req.method)) {

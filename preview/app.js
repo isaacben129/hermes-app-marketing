@@ -1,3 +1,4 @@
+/* QA preview: ReactDOM and SDK shim are bundled for browser harness only. */
 (() => {
   var __create = Object.create;
   var __defProp = Object.defineProperty;

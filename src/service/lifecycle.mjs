@@ -11,20 +11,26 @@ import { RendererClient } from './renderer-client.mjs'
 import { RenderArtifacts } from './artifacts.mjs'
 import { createActions } from './actions.mjs'
 import { createDefaultPostizReader } from '../integrations/postiz.mjs'
+import net from 'node:net'
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const handlerScript = `from http.server import HTTPServer\nfrom server import Handler\nHTTPServer(('127.0.0.1', int(__import__('sys').argv[1])), Handler).serve_forever()`
 
 export async function startLocal({ dataDir = process.env.HERMES_MARKETING_DATA_DIR, servicePort = 8764, rendererPort = 8765, allowedOrigin = 'null', python = process.env.PYTHON ?? 'python3', root = projectRoot, startupTimeoutMs = 10000 } = {}) {
+  if (!Number.isInteger(servicePort) || servicePort < 0 || servicePort > 65535 || !Number.isInteger(rendererPort) || rendererPort < 0 || rendererPort > 65535) throw new Error('Service and renderer ports must be integers in the range 0–65535')
+  if (servicePort && rendererPort && servicePort === rendererPort) throw new Error('Service and renderer ports must differ')
   if (!dataDir || !path.isAbsolute(dataDir)) throw new Error('HERMES_MARKETING_DATA_DIR must be an absolute path')
   await fs.mkdir(dataDir, { recursive: true, mode: 0o700 })
   const token = randomBytes(32).toString('hex')
-  const renderer = new RendererClient({ origin: `http://127.0.0.1:${rendererPort}`, timeoutMs: 1000 })
+  const actualRendererPort = rendererPort || await freePort()
+  const actualServicePort = servicePort || await freePort()
+  if (actualServicePort === actualRendererPort) throw new Error('Service and renderer ports must differ')
+  const renderer = new RendererClient({ origin: `http://127.0.0.1:${actualRendererPort}`, timeoutMs: 1000 })
   let child = null
   try { await renderer.health() }
   catch (error) {
     if (error.code === 'protocol_mismatch') throw error
-    child = spawn(python, ['-c', handlerScript, String(rendererPort)], { cwd: path.join(root, 'renderer'), stdio: 'ignore', env: { ...process.env, PYTHONPATH: path.join(root, 'renderer'), HERMES_MARKETING_RENDER_CACHE: path.join(dataDir, 'render-cache') } })
+    child = spawn(python, ['-c', handlerScript, String(actualRendererPort)], { cwd: path.join(root, 'renderer'), stdio: 'ignore', env: { ...process.env, PYTHONPATH: path.join(root, 'renderer'), HERMES_MARKETING_RENDER_CACHE: path.join(dataDir, 'render-cache') } })
     let spawnError = null
     child.on('error', error => { spawnError = error })
     try {
@@ -48,7 +54,7 @@ export async function startLocal({ dataDir = process.env.HERMES_MARKETING_DATA_D
   try { postizReader = createDefaultPostizReader() } catch { /* invalid provider configuration remains unavailable */ }
   const actions = createActions({ workspace, ledger, runner, renderer, artifacts, postizReader, python })
   const server = createService({ actions, token, allowedOrigin })
-  try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(servicePort, '127.0.0.1', resolve) }) }
+  try { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(actualServicePort, '127.0.0.1', resolve) }) }
   catch (error) { if (child) await stopChild(child); throw error }
   const connection = path.join(dataDir, 'connection.json')
   try {
@@ -73,6 +79,8 @@ export async function startLocal({ dataDir = process.env.HERMES_MARKETING_DATA_D
   }
 }
 
+
+
 async function stopChild(child) {
   if (child.exitCode !== null || child.signalCode !== null) return
   const exited = new Promise(resolve => child.once('exit', resolve))
@@ -83,4 +91,12 @@ async function stopChild(child) {
     child.kill('SIGKILL')
     await killed
   }
+}
+
+async function freePort() {
+  const server = net.createServer()
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+  const { port } = server.address()
+  await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  return port
 }
