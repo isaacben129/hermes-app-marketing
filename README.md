@@ -1,26 +1,28 @@
 # App Marketing System · Hermes Desktop plugin
 
-The Marketing page is a local, service-backed workflow for app-scoped drafts, evidence, review, image rendering, exports, experiment recommendations, and aggregate outcome intake. Cherry is the first configured app. It deliberately leaves claims, asset rights, CTA, channels, privacy/event definitions, and business metrics unconfigured until an owner provides evidence and approves them.
+The Marketing page is a local, service-backed workflow for app-scoped drafts, evidence, review, image rendering, exports, experiment recommendations, and aggregate outcome intake. Cherry is the first configured app. Claims, asset rights, CTA, channels, privacy/event definitions, and business metrics remain unconfigured until an owner provides evidence and approves them.
 
 ## Local services
 
-Set an absolute `HERMES_MARKETING_DATA_DIR` and run `npm run start:local`. The service binds to `127.0.0.1`; it starts and supervises the Python/Pillow renderer, creates a private local connection file with a bearer token, and removes that file on clean shutdown. The UI never writes the provider token to plugin storage: its bearer token protects only calls to the loopback service. Keep the data directory private and back it up as local application data.
+Set an absolute `HERMES_MARKETING_DATA_DIR` and run `npm run start:local`. The service binds to `127.0.0.1`; it starts and supervises the Python/Pillow renderer, creates a private local `connection.json` with a bearer token, and removes that file on clean shutdown. Keep the data directory private and back it up as local application data. Do not copy the connection file or token into source control, exports, or messages.
 
-If the UI is hosted on a different origin, set `HERMES_MARKETING_ALLOWED_ORIGIN` to that exact origin before starting the service. Do not expose this service to a LAN. The runtime connection file is in the configured data directory and must not be copied into source control, exports, or messages.
+Configure `HERMES_MARKETING_ALLOWED_ORIGIN` to the exact browser UI origin. The service URL field accepts localhost aliases, but the service currently checks for its canonical `127.0.0.1:<port>` Host header. Use the exact URL printed by the launcher and stored in `connection.json`; set the UI Origin separately. Do not expose this service to a LAN.
 
-In **App settings**, enter the local service URL and the bearer token from that connection file; the token field is masked and saved only in Hermes plugin storage. Connect to load service-owned records. **Overview** opens saved drafts and offers a read-only Postiz sync. **Slideshows** supports evidence entry, structured slides, operator-supplied images, save with revision checking, service review, render of the saved revision, thumbnail selection, and service ZIP export. Legacy plugin-local drafts can be imported once; the local backup is retained after successful service readback.
+In **App settings**, enter the local service URL and bearer token from `connection.json`. Overview opens saved drafts and offers read-only Postiz sync. Slideshows supports evidence entry, structured slides, operator-supplied images, revision-checked saves, service review, render of a saved revision, thumbnail preview, and ZIP export. Legacy plugin-local drafts can be imported once; retain the backup until service readback succeeds.
 
-The service returns explicit blocked, unavailable, stale, and inconclusive states. A render or export does not approve campaign use or distribution. No publishing, scheduling, or provider draft-write operation is exposed.
+A render/export does not approve campaign use or distribution. The service reports blocked, unavailable, stale and inconclusive states; no publishing, scheduling or external draft-write operation is provided.
+
+## Installed bundle and native verification
+
+Worktree mirrors `plugin.js`, `desktop/plugin.js`, and `desktop-plugins/marketing-system/plugin.js` are byte-identical. The separately installed `/opt/data/desktop-plugins/marketing-system/plugin.js` differs from this tested branch. It was not overwritten or reloaded. The browser preview uses an SDK shim, not the Hermes Desktop host; native installation and load verification remain blocked pending authorized reconciliation.
 
 ## Postiz and app outcomes
 
-The Postiz adapter is read-only and requires operator-provided `POSTIZ_BASE_URL` and `POSTIZ_API_KEY` in the service process environment. Do not put the key into plugin storage, requests, logs, Git, or exports. Live credentials and reads were not verified in this environment. Postiz engagement metrics do not establish qualified or paid outcomes. Outcome imports require an approved app profile, event definitions, privacy policy, and verified attribution; without these, the system must remain unavailable or inconclusive.
+The Postiz adapter is read-only and requires `POSTIZ_BASE_URL` and `POSTIZ_API_KEY` in the service process environment. Keep credentials out of plugin storage, requests, logs, Git, and exports. Live credentials and post/metric reads were not verified. Engagement metrics do not establish qualified or paid outcomes. Outcome imports require an approved app profile, event definitions, privacy policy, and verified attribution; otherwise the result remains unavailable or inconclusive.
 
 ## Browser QA preview
 
-Run `npm ci`, then `npm run preview`. Visit [http://127.0.0.1:8766](http://127.0.0.1:8766), and allow that exact origin in the marketing service CORS configuration. The preview uses a browser-only Hermes SDK shim and browser local storage; it does not prove native Hermes Desktop host behavior.
-
-Build the production plugin and byte-identical package mirrors with `npm run build`. The host supplies React, JSX runtime, and `@hermes/plugin-sdk`.
+Run `npm ci`, then `npm run preview`. Visit `http://127.0.0.1:8766` and configure that exact origin in the service if needed. The browser-only Hermes SDK shim and browser storage do not prove native Desktop behavior.
 
 ## Verification (WSL/Linux shell)
 
@@ -31,7 +33,7 @@ mkdir -p "$HERMES_MARKETING_DATA_DIR"
 npm run start:local
 ```
 
-The process prints the path to `connection.json`; keep its bearer token private. Stop with Ctrl+C for normal cleanup. For a non-default Desktop origin, set `HERMES_MARKETING_ALLOWED_ORIGIN` to the exact origin before starting. Never expose the service to a LAN.
+The launcher prints the connection-file path. Keep its token private. Stop with Ctrl+C. Never expose the service to a LAN.
 
 ```sh
 npm test
@@ -41,4 +43,4 @@ node tests/plugin-smoke.mjs
 node tests/pipeline.mjs
 ```
 
-The registered UI integration test exercises the actual UI through the live loopback HTTP service, supervised renderer, saved-image readback, real ZIP response, and archive manifest. This browser/React harness is separate from installing and inspecting the plugin in the native Desktop app. The app plugin was previously installed under `/opt/data/desktop-plugins/marketing-system/plugin.js` and the Windows host mirror under `/opt/data/C:/Users/isaac/AppData/Local/hermes/desktop-plugins/marketing-system/plugin.js`; their equality to this final bundle and actual native load state require a separate verification.
+The registered UI integration test exercises UI→loopback service→supervised renderer→real ZIP export, but does not constitute native Desktop installation or host acceptance.
