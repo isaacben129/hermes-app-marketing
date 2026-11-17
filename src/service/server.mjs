@@ -33,8 +33,13 @@ export function createService({ actions, token, allowedOrigin = 'null' }) {
     const origin = req.headers.origin
     const originAllowed = origin === allowedOrigin || (allowOpaqueOrigin && origin === 'null')
     const corsOrigin = origin === allowedOrigin ? allowedOrigin : undefined
-    const expectedHost = `127.0.0.1:${res.socket.localPort}`
-    if (req.headers.host !== expectedHost) { errorResponse(res, 403, 'provider_denied', corsOrigin); return }
+    // Node lowercases Host but retains the supplied authority. Validate the port
+    // and constrain the name to loopback without rejecting configured aliases.
+    const host = req.headers.host ?? ''
+    const match = /^(127\.0\.0\.1|localhost|\[::1\]):(\d+)$/.exec(host)
+    if (!match || Number(match[2]) !== res.socket.localPort) {
+      errorResponse(res, 403, 'provider_denied', corsOrigin); return
+    }
     if (req.method === 'OPTIONS') {
       if (!originAllowed) { errorResponse(res, 403, 'provider_denied'); return }
       res.writeHead(204, { ...(corsOrigin ? { 'access-control-allow-origin': corsOrigin, vary: 'Origin' } : {}), 'access-control-allow-methods': 'GET, PUT, POST, DELETE, OPTIONS', 'access-control-allow-headers': 'Authorization, Content-Type', 'access-control-max-age': '600' })

@@ -4,7 +4,7 @@
 
 Choose a private local directory, set its absolute path as `HERMES_MARKETING_DATA_DIR`, and run `npm run start:local`. This wrapper is declared in `package.json` and starts `scripts/start-local.mjs`. The service binds only to loopback, supervises the Python/Pillow renderer, creates a private `connection.json` containing its URL and bearer token, and removes that file on clean shutdown. Read the connection details only on this device; do not paste the token into chat, source files, Git, or exports. The data directory contains local workspace records and content-addressed images; back it up as private application data.
 
-If the UI uses a network origin, configure that exact origin. The UI accepts loopback HTTP service URLs only; its hostname must be the bound service's loopback (`127.0.0.1`, `localhost`, or `[::1]`). The service checks the `Host` header against the requested local port. Missing origin is never allowed, and `null` is not a permissive wildcard. Do not use `*` or expose the listener to a LAN.
+If the UI uses a network origin, configure that exact origin. The UI accepts loopback HTTP service URLs only; its hostname may be `127.0.0.1`, `localhost`, or `[::1]`. The service accepts those three Host names only when the port exactly matches its own listener, which remains bound to `127.0.0.1`. Missing origin is never allowed, and `null` is not a permissive wildcard. Do not use `*` or expose the listener to a LAN.
 
 ## Postiz and outcomes
 

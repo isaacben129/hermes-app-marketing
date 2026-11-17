@@ -6,7 +6,7 @@ The Marketing page is a local, service-backed workflow for app-scoped drafts, ev
 
 Set an absolute `HERMES_MARKETING_DATA_DIR` and run `npm run start:local`. The service binds to `127.0.0.1`; it starts and supervises the Python/Pillow renderer, creates a private local `connection.json` with a bearer token, and removes that file on clean shutdown. Keep the data directory private and back it up as local application data. Do not copy the connection file or token into source control, exports, or messages.
 
-Configure `HERMES_MARKETING_ALLOWED_ORIGIN` to the exact browser UI origin. The service URL field accepts localhost aliases, but the service currently checks for its canonical `127.0.0.1:<port>` Host header. Use the exact URL printed by the launcher and stored in `connection.json`; set the UI Origin separately. Do not expose this service to a LAN.
+Configure the service with the exact browser UI origin using `HERMES_MARKETING_ALLOWED_ORIGIN`. Never use `*` and do not expose the service to a LAN. The UI accepts `127.0.0.1`, `localhost` and `[::1]` service URLs; Host validation permits those three loopback names only on the bound service port. The service itself binds to `127.0.0.1`.
 
 In **App settings**, enter the local service URL and bearer token from `connection.json`. Overview opens saved drafts and offers read-only Postiz sync. Slideshows supports evidence entry, structured slides, operator-supplied images, revision-checked saves, service review, render of a saved revision, thumbnail preview, and ZIP export. Legacy plugin-local drafts can be imported once; retain the backup until service readback succeeds.
 
