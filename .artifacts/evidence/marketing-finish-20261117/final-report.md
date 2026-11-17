@@ -8,10 +8,12 @@ Local implementation work is complete at `integration/marketing-completion-20261
 - `npm run build`: passed; React focused suite 3/3.
 - Python unittest discovery: 19/19 passing.
 - `node tests/plugin-smoke.mjs`: passed.
-- `node --test tests/service.test.mjs` after loopback alias fix: 4/4 passing.
+- `node tests/pipeline.mjs`: passed.
+- `node --test tests/service.test.mjs`: 4/4 passing after loopback alias fix.
+- `node --test tests/system-health.test.mjs tests/ui-live.test.mjs tests/workflow-ui.test.mjs`: 8/8 passing with queue metrics assertions.
 - UI-to-live-HTTP-service-to-supervised-renderer integration produced a real ZIP (29,391 bytes in test); service E2E produced a real ZIP (12,233 bytes in test).
 - `git diff --check`: passed; worktree clean.
-- Built package mirrors `plugin.js`, `desktop/plugin.js`, and `desktop-plugins/marketing-system/plugin.js` all SHA-256 `3a8d3ecbb7f8f56eb539a25afded1b46f42f49c893457ce0944aeb24db641247`.
+- Built package mirrors `plugin.js`, `desktop/plugin.js`, and `desktop-plugins/marketing-system/plugin.js` all SHA-256 `56c0283623b8f624edb6860892eaa80f178329395fde3309a07f26f18776da3c` after adding System Health queue counts.
 
 ## Still open — not safely executable without more access or authorization
 1. **Native Desktop acceptance:** separately installed `/opt/data/desktop-plugins/marketing-system/plugin.js` is still older/different, SHA-256 `0598de088a634bc410f9e280d76ce063fab325b5d69f5ed3ab09b156f6d94c70`. No native host/CDP (`127.0.0.1:9222` refused); no reload/load verification. Do not overwrite it automatically.

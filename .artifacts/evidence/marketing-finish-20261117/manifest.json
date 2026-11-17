@@ -1,6 +1,6 @@
 {
   "branch": "integration/marketing-completion-20261117",
-  "commit": "b16d32cc05ce63375e7b41256a3db320fc368444",
+  "commit": "67dd99d71ffb2bf5f5df4b43cfef370f8e723c57",
   "working_tree": "clean; local integration only",
   "environment": {
     "date": "2026-11-17",
@@ -41,7 +41,7 @@
   "evidence_limitations": [
     "Reported commit is the verified code integration SHA; evidence bundle updates remain uncommitted and local-only.",
     "Generated-image local pipeline discrepancy was reproduced then resolved by successful fresh saved-revision render/export through service action using the same generated image; the earlier failed service attempt remains unexplained but is superseded by the successful full workflow.",
-    "Independent audit directly checked this exact continuation worktree. Worktree mirrors match each other, but separately installed plugin differs; no native host is available for verification.",
+    "Active branch received service Host alias fix b16d32c and System Health queue metrics UI commit 6b8186e; full tests/build re-run passed. The UX commit is still separate worktree and not cherry-picked into integration.",
     "No live Cherry campaign used approved assets or human clearances.",
     "Generated image saved/rendered/exported through local service action successfully using same image; prior failure from earlier attempt is superseded by fresh full workflow evidence.",
     "A separate Cherry source worktree contains a weekly funnel document naming practice_complete, purchase_completed, and campaign/hook/source fields, but it explicitly says campaign attribution is not yet populated and Firebase/BigQuery export is manual; definitions are not yet approved for this system.",
