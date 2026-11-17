@@ -38,13 +38,13 @@ test('registered UI uses live HTTP service through save, readback, render, previ
       await act(async () => body.props.onChange({ target: { value: `Body ${i+1}` } }))
       await click(`Choose native image for slide ${i+1}`)
     }
-    await click('Save to service'); for (let i=0;i<100 && !renderer.root.findAllByProps({role:'status'}).some(x=>x.children.join('').includes('Saved and verified'));i++) await new Promise(r=>setTimeout(r,20)); await act(async()=>{}); await click('Overview'); 
+    await click('Save to service'); for (let i=0;i<100 && !renderer.root.findAllByProps({role:'status'}).some(x=>x.children.join('').includes('Saved and verified'));i++) await new Promise(r=>setTimeout(r,20)); await act(async()=>{}); await click('Overview');
     await click('Untitled Cherry draft · draft · Open')
     const reopenedBody = renderer.root.findAllByType('textarea').find(x => x.props['aria-label'] === 'Slide 1 body'); await act(async () => reopenedBody.props.onChange({ target: { value: 'Body 1 revised after readback' } })); await click('Save to service'); for (let i=0;i<100 && !renderer.root.findAllByProps({role:'status'}).some(x=>x.children.join('').includes('Saved and verified'));i++) await new Promise(r=>setTimeout(r,20)); await act(async()=>{})
     const ws = await (await fetch(`${values.get('serviceUrl')}/api/workspace?app=Cherry`, { headers: { Authorization: `Bearer ${service.token}`, Origin: 'null' } })).json(); assert.equal(ws.drafts[0].slides.length, 2); assert.ok(ws.drafts[0].slides.every(slide => /^image:[a-f0-9]{64}$/.test(slide.selectedImage.contentRef))); await click('Render saved revision')
     const jobResponse = await fetch(`${values.get('serviceUrl')}/api/jobs` , { headers: { Authorization: `Bearer ${service.token}` } }); const jobs = await jobResponse.json()
     assert.equal(jobs[0].status, 'succeeded'); assert.deepEqual(jobs[0].events.map(x => x.status), ['queued','running','succeeded'])
-    
+
     await click('Show slide 2'); assert.equal(renderer.root.findByProps({ alt: 'Rendered slide 2' }).props.alt, 'Rendered slide 2')
     await click('Export rendered ZIP')
     const blob = downloads.find(x => x instanceof Blob); assert.ok(blob, 'UI downloaded the real service ZIP response')
