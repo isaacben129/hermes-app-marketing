@@ -3,7 +3,7 @@
   "name": "Cherry",
   "brand": {
     "promise": "Practice social situations. Start small. Get better over time.",
-    "source": { "locator": "/opt/data/workspace/cherry/docs/brand-guidelines.md", "version": "2026-11-17" },
+    "source": { "locator": "/opt/data/workspace/cherry/docs/brand-guidelines.md", "version": "004e00e8a14550cdd8947bef0d38a32cf186658a" },
     "tone": ["calm", "matter-of-fact", "supportive", "plain language"],
     "avoidClaims": ["therapy", "cure", "heal", "guaranteed outcome", "fix", "transform"]
   },
