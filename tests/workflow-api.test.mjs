@@ -10,7 +10,18 @@ import { LocalJobRunner } from '../src/jobs/runner.mjs'
 import { createActions } from '../src/service/actions.mjs'
 import { createService } from '../src/service/server.mjs'
 
-const approvedProfile = () => ({ ...structuredClone(cherry), configuration: { ...cherry.configuration, qualifiedEvent: approved('qualified_start'), paidEvent: approved('purchase'), privacyPolicy: approved('privacy-v1') } })
+const approvedProfile = (app = 'Cherry') => {
+  const profile = structuredClone(cherry)
+  profile.name = app
+  profile.appId = app.toLowerCase()
+  delete profile.status
+  delete profile.campaign
+  delete profile.measurement
+  delete profile.provisionalEventCandidates
+  delete profile.notes
+  profile.configuration = { ...profile.configuration, qualifiedEvent: approved('qualified_start'), paidEvent: approved('purchase'), privacyPolicy: approved('privacy-v1') }
+  return profile
+}
 const approved = value => ({ value, status: 'approved', evidenceRef: 'owner:evidence', reviewer: 'owner', reviewedAt: '2026-11-17T00:00:00Z' })
 
 async function fixture(t, postizReader = null) {
@@ -149,7 +160,7 @@ test('unknown channel is blocked and does not emit successful sync', async t => 
   await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile })
   const known = await call('/api/postiz/sync', 'POST', { app: 'Cherry', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
   assert.equal(known.body.status, 'connected')
-  const other = approvedProfile(); other.name = 'Other'; other.appId = 'other'
+  const other = approvedProfile('Other')
   await call('/api/profiles/Other', 'PUT', { expectedRevision: 0, profile: other })
   const result = await call('/api/postiz/sync', 'POST', { app: 'Other', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
   assert.equal(result.body.status, 'blocked')
@@ -165,7 +176,7 @@ test('offline sync for another app does not inherit the first app last success',
   const profileA = approvedProfile(); profileA.configuration.channel = approved('int-1')
   await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile: profileA })
   await call('/api/postiz/sync', 'POST', { app: 'Cherry', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
-  const profileB = approvedProfile(); profileB.name = 'Other'; profileB.appId = 'other'
+  const profileB = approvedProfile('Other')
   await call('/api/profiles/Other', 'PUT', { expectedRevision: 0, profile: profileB })
   offline = true
   const result = await call('/api/postiz/sync', 'POST', { app: 'Other', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
