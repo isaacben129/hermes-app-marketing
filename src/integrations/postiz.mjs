@@ -88,7 +88,30 @@ export function createPostizReader({ transport, clock = () => new Date().toISOSt
       return { status: stale ? 'stale' : 'unavailable', observations: stale ?? [], error: safeError(error) }
     }
   }
-  return { listIntegrations, listPosts, readPost, readMetrics }
+  const readPlatformMetrics = async ({ integrationId, days, appId, scopedIntegrationId } = {}) => {
+    if (typeof scopedIntegrationId !== 'string' || !scopedIntegrationId || integrationId !== scopedIntegrationId || !Number.isInteger(days) || days < 1 || days > 365 || typeof appId !== 'string' || !appId) throw Object.assign(new TypeError('valid scoped platform analytics scope is required'), { code: 'invalid_input' })
+    const key = `integration:${integrationId}:${days}:${appId}`
+    try {
+      const value = await request(`/analytics/${integrationId}`, { date: String(days) })
+      if (!Array.isArray(value)) throw Object.assign(new Error('Invalid analytics response'), { code: 'unavailable' })
+      const observations = []
+      for (const metric of value) {
+        if (!object(metric) || typeof metric.label !== 'string' || !Array.isArray(metric.data)) throw Object.assign(new Error('Invalid metric bucket'), { code: 'unavailable' })
+        for (const bucket of metric.data) {
+          if (!object(bucket) || !isoDay(bucket.date)) throw Object.assign(new Error('Invalid metric date bucket'), { code: 'unavailable' })
+          const numeric = typeof bucket.total === 'string' && bucket.total.trim() !== '' ? Number(bucket.total) : typeof bucket.total === 'number' ? bucket.total : NaN
+          const available = Number.isFinite(numeric)
+          observations.push({ source: 'postiz', integrationId, appId, creativeRevision: null, attribution: { status: 'unmapped' }, metric: metric.label, value: available ? numeric : null, denominator: null, windowStart: bucket.date, windowEnd: bucket.date, observedAt: clock(), status: available ? 'available' : 'unsupported', coverage: null, evidenceId: `postiz:${integrationId}:${metric.label}:${bucket.date}`, fixtureOnly: false })
+        }
+      }
+      cachedMetrics.set(key, observations)
+      return { status: 'available', observations }
+    } catch (error) {
+      const stale = cachedMetrics.get(key)
+      return { status: stale ? 'stale' : 'unavailable', observations: stale ?? [], error: safeError(error) }
+    }
+  }
+  return { listIntegrations, listPosts, readPost, readMetrics, readPlatformMetrics }
 }
 
 export function createDefaultPostizReader({ env = process.env, fetchImpl = fetch, timeoutMs = 10000 } = {}) {
@@ -101,7 +124,8 @@ export function createDefaultPostizReader({ env = process.env, fetchImpl = fetch
   if (!['/api/public/v1', '/public/v1'].includes(base.pathname.replace(/\/$/, ''))) throw new TypeError('Postiz base URL must end with /api/public/v1 or /public/v1')
   const allowedPaths = new Set(['/integrations', '/posts'])
   const transport = async ({ method, path, query }) => {
-    if (method !== 'GET' || !(allowedPaths.has(path) || /^\/analytics\/post\/[A-Za-z0-9_-]+$/.test(path))) throw Object.assign(new Error('Route denied'), { status: 403 })
+    const isAnalytics = /^\/analytics\/post\/[A-Za-z0-9_-]+$/.test(path) || /^\/analytics\/[A-Za-z0-9_-]+$/.test(path)
+    if (method !== 'GET' || !(allowedPaths.has(path) || isAnalytics)) throw Object.assign(new Error('Route denied'), { status: 403 })
     const url = new URL(`${base.href.replace(/\/$/, '')}${path}`)
     for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, String(value))
     const response = await fetchImpl(url, { method: 'GET', headers: { Authorization: apiKey }, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) })

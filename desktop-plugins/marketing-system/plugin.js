@@ -662,8 +662,8 @@ function MarketingPage({ ctx }) {
     ),
     h3("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, button("Sync Postiz (read only)", async () => {
       try {
-        const result = await api("/api/postiz/sync", { method: "POST", body: JSON.stringify({ app: selectedApp, window: "last-30-days", days: 30 }) });
-        setNotice(result.status === "available" ? `Read ${result.posts?.length || 0} posts and ${result.observations?.length || 0} observations.` : `Postiz sync: ${result.status}`);
+        const result = await api("/api/postiz/sync", { method: "POST", body: JSON.stringify({ app: selectedApp, window: { start: new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10), end: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) }, days: 30 }) });
+        setNotice(result.status === "blocked" && result.error?.code === "channel_unconfigured" ? `Postiz is reachable. Configure ${result.integrations?.length || 0} integration(s) in this app's approved profile.` : `Postiz sync: ${result.status}${result.platformAnalyticsStatus ? ` \xB7 channel analytics ${result.platformAnalyticsStatus}` : ""}${result.posts?.length != null ? ` \xB7 ${result.posts.length} matched posts` : ""}`);
         await reload();
       } catch (e) {
         setError(e.message);

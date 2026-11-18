@@ -218,28 +218,44 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
       }
       try {
         const profile = state.profiles.find(item => item.appId === app.toLowerCase())
+        const channelConfig = profile?.configuration?.channel
+        const configuredChannel = channelConfig?.value
+        const channelId = typeof configuredChannel === 'string' ? configuredChannel : configuredChannel?.integrationId
+        if (!channelId && app.toLowerCase() !== 'cherry') {
+          const [integrations, listedPosts] = await Promise.all([postizReader.listIntegrations(), postizReader.listPosts({ window })])
+          const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced' && event.payload?.app === app)?.payload?.syncedAt ?? null
+          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), integrations, listedPosts, lastSuccess, error: { code: 'channel_unconfigured' } }
+        }
+        if (!channelId) {
+          const cherry = app.toLowerCase() === 'cherry'
+          let integrations = [], listedPosts = []
+          if (cherry) [integrations, listedPosts] = await Promise.all([postizReader.listIntegrations(), postizReader.listPosts({ window })])
+          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), ...(cherry ? { integrations: integrations.filter(item => item.platform === 'tiktok' || item.name === 'cherrysocialanxiety') } : {}), ...(cherry ? { listedPosts } : {}), lastSuccess, error: { code: 'channel_unconfigured' } }
+        }
+        if (channelConfig?.status !== 'approved') {
+          const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced' && event.payload?.app === app)?.payload?.syncedAt ?? null
+          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), lastSuccess, error: { code: 'channel_not_approved' } }
+        }
         const [integrations, listedPosts] = await Promise.all([postizReader.listIntegrations(), postizReader.listPosts({ window })])
-        const channel = profile?.configuration?.channel
-        const channelId = channel?.status === 'approved' ? (typeof channel.value === 'string' ? channel.value : channel.value?.integrationId) : null
-        const integration = channelId && integrations.find(item => item.id === channelId && item.disabled !== true)
+        const platformMetrics = typeof postizReader.readPlatformMetrics === 'function' ? await postizReader.readPlatformMetrics({ integrationId: channelId, days, appId: app.toLowerCase(), scopedIntegrationId: channelId }) : { status: 'unavailable', observations: [], error: { code: 'unavailable' } }
+        const integration = integrations.find(item => item.id === channelId && item.disabled !== true)
         if (!integration) {
           const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced' && event.payload?.app === app)?.payload?.syncedAt ?? null
-          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), lastSuccess, error: { code: channelId ? 'channel_unmatched' : 'channel_unconfigured' } }
+          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), lastSuccess, error: { code: 'channel_unmatched' } }
         }
-        const matchedPosts = integration ? listedPosts.filter(post => post.integration?.id === integration.id) : []
+        const matchedPosts = listedPosts.filter(post => post.integration?.id === integration.id)
         const posts = matchedPosts.map(post => ({ id: post.id, content: post.content, publishDate: post.publishDate, releaseURL: post.releaseURL, state: post.state, integration: post.integration, channelMatch: { status: 'matched', profileIntegrationId: integration.id, providerIntegrationId: post.integration.id }, syncedAt: clock() }))
-        const observations = []
-        let staleMetrics = false
+        const observations = [...(platformMetrics.status === 'available' || platformMetrics.status === 'stale' ? platformMetrics.observations : [])]
+        let staleMetrics = platformMetrics.status === 'stale'
         for (const post of posts) {
           const metrics = await postizReader.readMetrics({ postId: post.id, days, appId: app.toLowerCase(), creativeRevision: null })
-          if (metrics.status === 'unavailable') throw Object.assign(new Error('Postiz metrics unavailable'), { code: metrics.error?.code ?? 'unavailable' })
+          if (metrics.status === 'unavailable') continue
           if (metrics.status === 'stale') staleMetrics = true
           if (metrics.status === 'available' || metrics.status === 'stale') observations.push(...metrics.observations.map(item => ({ ...item, creativeRevision: Number.isSafeInteger(item.creativeRevision) && item.creativeRevision >= 0 ? item.creativeRevision : null, attribution: item.attribution ?? { status: 'unmapped' }, ...(metrics.status === 'stale' ? { status: 'stale' } : {}) })))
         }
-        const unmatchedCount = listedPosts.length - matchedPosts.length
-        const revision = await persist('postiz.synced', app, { posts, observations, unmatchedCount, syncedAt: clock(), degraded: staleMetrics }, state.revision)
-        postizLastSuccess = clock()
-        return { status: 'connected', posts, observations, unmatchedCount, lastSuccess: postizLastSuccess, revision }
+        const unmatchedCount = listedPosts.length - matchedPosts.length, syncedAt = clock()
+        const revision = await persist('postiz.synced', app, { posts, observations, unmatchedCount, syncedAt, degraded: staleMetrics || platformMetrics.status === 'unavailable', platformAnalyticsStatus: platformMetrics.status }, state.revision)
+        return { status: 'connected', posts, observations, platformAnalyticsStatus: platformMetrics.status, unmatchedCount, lastSuccess: syncedAt, revision }
       } catch (error) {
         const code = error.code ?? 'unavailable'
         try { await persist('postiz.sync_failed', app, { errorCode: code, failedAt: clock() }, state.revision) } catch {}

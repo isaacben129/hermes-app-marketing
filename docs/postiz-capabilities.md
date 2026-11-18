@@ -1,6 +1,16 @@
 # Postiz connection capability boundary
 
-The local marketing service supports read-only Postiz access through an operator-supplied `POSTIZ_BASE_URL` ending in `/api/public/v1` (or `https://api.postiz.com/public/v1`) and `POSTIZ_API_KEY`. The default client sends `GET` requests only, uses the raw API key in `Authorization`, denies redirects, requires HTTPS except loopback development, applies request timeouts, and allows only these documented paths:
+The Postiz read-only adapter supports an operator-supplied `POSTIZ_BASE_URL` ending in `/api/public/v1` or `/public/v1` and `POSTIZ_API_KEY` in the local service process environment. It sends GET requests only, requires HTTPS except loopback development, denies redirects, applies request timeouts, and restricts access to documented integrations, posts, and analytics routes. The local app workspace must select the integration explicitly; for Cherry TikTok, use `cmrb2tjm80001ow6vkzhk1yg9`.
+
+## Enable Cherry TikTok analytics
+
+1. Generate a Postiz API key in Postiz settings.
+2. Store it in the machine's protected secret manager or service environment as `POSTIZ_API_KEY`. Never place it in chat, plugin storage, request bodies, logs, Git, or exports.
+3. Set `POSTIZ_BASE_URL=https://api.postiz.com/public/v1` (or a separately verified self-hosted URL).
+4. Configure Cherry's app profile `configuration.channel` to the selected integration ID and approved status.
+5. Restart the local marketing service and run its read-only sync. Confirm the selected integration is TikTok. The service has no create/upload/schedule/publish calls.
+
+Without these environment variables the reader remains disconnected. Live analytics reads remain unverified until the user configures the key. Social views/impressions are channel observations, not qualified activations or paid outcomes; their app attribution remains unmapped. App-funnel analytics require a separate approved privacy/event profile and verified app data source.
 
 - `GET /integrations`
 - `GET /posts?startDate=...&endDate=...` (including cursor pagination only when the response advertises it)

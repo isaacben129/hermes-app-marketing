@@ -147,7 +147,7 @@ test('generation intake rejects bytes that are not the declared image before wri
 test('Postiz sync is app channel matched and leaves creative attribution unknown',async t=>{const reader={listIntegrations:async()=>[{id:'int-1',name:'Brand'}],listPosts:async()=>[{id:'p1',content:'hello',integration:{id:'int-1'}},{id:'p2',integration:{id:'other'}}],readMetrics:async()=>({status:'available',observations:[{source:'postiz',postId:'p1',appId:'cherry',creativeRevision:null,metric:'views',value:0,status:'available',evidenceId:'postiz:p1:views:2026-11-01',attribution:{status:'unmapped'}}]})};const {call}=await fixture(t,reader);const profile=approvedProfile();profile.configuration.channel=approved('int-1');await call('/api/profiles/Cherry','PUT',{expectedRevision:0,profile});let result=await call('/api/postiz/sync','POST',{app:'Cherry',window:{start:'2026-11-01',end:'2026-11-07'},days:7});assert.equal(result.body.status,'connected');assert.deepEqual(result.body.posts.map(post=>post.id),['p1']);assert.equal(result.body.observations[0].creativeRevision,null);assert.deepEqual(result.body.observations[0].attribution,{status:'unmapped'});assert.equal((await call('/api/workspace?app=Cherry')).body.posts.length,1)})
 
 test('unknown channel is blocked and does not emit successful sync', async t => {
-  const reader = { listIntegrations: async () => [{ id: 'int-1' }], listPosts: async () => [{ id: 'p1', integration: { id: 'int-1' } }], readMetrics: async () => ({ status: 'available', observations: [] }) }
+  const reader = { listIntegrations: async () => [{ id: 'int-1' }], listPosts: async () => [{ id: 'p1', integration: { id: 'int-1' } }], readMetrics: async () => ({ status: 'available', observations: [] }), readPlatformMetrics: async () => ({ status: 'unavailable', observations: [] }) }
   const { call } = await fixture(t, reader)
   const profile = approvedProfile(); profile.configuration.channel = approved('int-1')
   await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile })
@@ -202,7 +202,8 @@ test('stale Postiz metric cache is durably marked stale and health becomes atten
   const reader = {
     listIntegrations: async () => [{ id: 'int-1' }],
     listPosts: async () => [{ id: 'p1', integration: { id: 'int-1' } }],
-    readMetrics: async () => ({ status: stale ? 'stale' : 'available', observations: [{ source: 'postiz', postId: 'p1', appId: 'cherry', creativeRevision: 0, metric: 'views', value: 2, status: 'available', evidenceId: 'postiz:p1:views:2026-11-01' }] })
+    readMetrics: async () => ({ status: stale ? 'stale' : 'available', observations: [{ source: 'postiz', postId: 'p1', appId: 'cherry', creativeRevision: 0, metric: 'views', value: 2, status: 'available', evidenceId: 'postiz:p1:views:2026-11-01' }] }),
+    readPlatformMetrics: async () => ({ status: 'available', observations: [] })
   }
   const { call } = await fixture(t, reader)
   const profile = approvedProfile(); profile.configuration.channel = approved('int-1')
