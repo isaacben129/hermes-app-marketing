@@ -31,7 +31,7 @@ async function fixture(t, postizReader = null) {
     const response = await fetch(`${base}${route}`, { method, headers: { Authorization: 'Bearer local-secret', Origin: 'http://127.0.0.1:3000', 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
     return { status: response.status, body: await response.json() }
   }
-  return { call, workspace }
+  return { call, workspace, actions }
 }
 
 test('real HTTP profile CAS, scoped workspace, hard-block review, and experiment persist', async t => {
@@ -144,7 +144,58 @@ test('generation intake rejects bytes that are not the declared image before wri
   assert.equal(state.drafts[0].generatedAssets, undefined)
 })
 
-test('Postiz sync is app channel matched and leaves creative attribution unknown',async t=>{const reader={listIntegrations:async()=>[{id:'int-1',name:'Brand'}],listPosts:async()=>[{id:'p1',content:'hello',integration:{id:'int-1'}},{id:'p2',integration:{id:'other'}}],readMetrics:async()=>({status:'available',observations:[{source:'postiz',postId:'p1',appId:'cherry',creativeRevision:null,metric:'views',value:0,status:'available',evidenceId:'postiz:p1:views:2026-11-01',attribution:{status:'unmapped'}}]})};const {call}=await fixture(t,reader);const profile=approvedProfile();profile.configuration.channel=approved('int-1');await call('/api/profiles/Cherry','PUT',{expectedRevision:0,profile});let result=await call('/api/postiz/sync','POST',{app:'Cherry',window:{start:'2026-11-01',end:'2026-11-07'},days:7});assert.equal(result.body.status,'connected');assert.deepEqual(result.body.posts.map(post=>post.id),['p1']);assert.equal(result.body.observations[0].creativeRevision,null);assert.deepEqual(result.body.observations[0].attribution,{status:'unmapped'});assert.equal((await call('/api/workspace?app=Cherry')).body.posts.length,1)})
+test('sync blocks Postiz metric listing until multiple integration IDs are explicitly selected for the app', async t => {
+  const reader = { listIntegrations: async () => [{ id: 'acct-1', disabled: false }, { id: 'acct-2', disabled: false }], listPosts: async () => [] }
+  const { call, workspace } = await fixture(t, reader)
+  await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile: approvedProfile() })
+  const result = await call('/api/postiz/sync', 'POST', { app: 'Cherry', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
+  assert.equal(result.body.status, 'blocked')
+  assert.equal(result.body.error.code, 'channel_unconfigured')
+  assert.deepEqual(result.body.posts, [])
+  assert.deepEqual(result.body.observations, [])
+  assert.equal((await workspace.load('Cherry')).revision, 1)
+})
+
+test('rejected channel configuration remains blocked until approved', async t => {
+  const reader = { listIntegrations: async () => [{ id: 'int-1', disabled: false }], listPosts: async () => [] }
+  const { call } = await fixture(t, reader)
+  const profile = approvedProfile(); profile.configuration.channel = { value: 'int-1', status: 'rejected', evidenceRef: 'owner:evidence', reviewer: 'owner', reviewedAt: '2026-11-17T00:00:00Z' }
+  await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile })
+  const result = await call('/api/postiz/sync', 'POST', { app: 'Cherry', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
+  assert.equal(result.body.status, 'blocked')
+  assert.equal(result.body.error.code, 'channel_not_approved')
+})
+
+test('Postiz sync fetches platform metrics for every selected account belonging to the app', async t => {
+  const calls = []
+  const reader = {
+    listIntegrations: async () => [{ id: 'account-a', disabled: false }, { id: 'account-b', disabled: false }, { id: 'other', disabled: false }],
+    listPosts: async () => [{ id: 'a-post', integration: { id: 'account-a' } }, { id: 'b-post', integration: { id: 'account-b' } }, { id: 'unassigned', integration: { id: 'other' } }],
+    readPlatformMetrics: async ({ integrationId }) => { calls.push(integrationId); return { status: 'available', observations: [{ source: 'postiz', integrationId, appId: 'cherry', metric: 'Followers', value: 5, attribution: { status: 'unmapped' }, evidenceId: `postiz:${integrationId}:Followers:2026-11-07` }] } },
+    readMetrics: async () => ({ status: 'available', observations: [] })
+  }
+  const { call } = await fixture(t, reader)
+  const approvedSelection = approvedProfile(); approvedSelection.configuration.channel = { value: { integrationIds: ['account-a', 'account-b'] }, status: 'approved', evidenceRef: 'owner:evidence', reviewer: 'owner', reviewedAt: '2026-11-17T00:00:00Z' }
+  await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile: approvedSelection })
+  const result = await call('/api/postiz/sync', 'POST', { app: 'Cherry', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
+  assert.equal(result.body.status, 'connected', JSON.stringify(result.body))
+  assert.deepEqual(calls, ['account-a', 'account-b'])
+  assert.deepEqual(result.body.posts.map(item => item.id), ['a-post', 'b-post'])
+  assert.equal(result.body.observations.length, 2)
+  assert.ok(result.body.observations.every(item => item.attribution.status === 'unmapped'))
+})
+
+test('Postiz binding helper validates IDs against live integrations and saves a pending multi-account selection', async t => {
+  const reader = { listIntegrations: async () => [{ id: 'account-a', disabled: false }, { id: 'account-b', disabled: false }] }
+  const { actions, workspace } = await fixture(t, reader)
+  const profile = approvedProfile()
+  await actions.saveProfile({ app: 'Cherry', expectedRevision: 0, profile })
+  const result = await actions.bindPostizIntegrations({ app: 'Cherry', integrationIds: ['account-a', 'account-b'] })
+  assert.deepEqual(result.profile.configuration.channel.value, ['account-a', 'account-b'])
+  assert.equal(result.profile.configuration.channel.status, 'pending')
+  assert.deepEqual((await workspace.load('Cherry')).profiles[0].configuration.channel.value, ['account-a', 'account-b'])
+  await assert.rejects(actions.bindPostizIntegrations({ app: 'Cherry', integrationIds: ['missing'] }), /not available/)
+})
 
 test('unknown channel is blocked and does not emit successful sync', async t => {
   const reader = { listIntegrations: async () => [{ id: 'int-1' }], listPosts: async () => [{ id: 'p1', integration: { id: 'int-1' } }], readMetrics: async () => ({ status: 'available', observations: [] }), readPlatformMetrics: async () => ({ status: 'unavailable', observations: [] }) }
@@ -169,7 +220,7 @@ test('offline sync for another app does not inherit the first app last success',
   const profileA = approvedProfile(); profileA.configuration.channel = approved('int-1')
   await call('/api/profiles/Cherry', 'PUT', { expectedRevision: 0, profile: profileA })
   await call('/api/postiz/sync', 'POST', { app: 'Cherry', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })
-  const profileB = approvedProfile('Other')
+  const profileB = approvedProfile('Other'); profileB.configuration.channel = approved('int-1')
   await call('/api/profiles/Other', 'PUT', { expectedRevision: 0, profile: profileB })
   offline = true
   const result = await call('/api/postiz/sync', 'POST', { app: 'Other', window: { start: '2026-11-01', end: '2026-11-07' }, days: 7 })

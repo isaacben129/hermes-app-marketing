@@ -16,7 +16,7 @@ function response(res, status, body, origin) {
 }
 
 function errorResponse(res, status, code, origin) {
-  const messages = { invalid_input: 'Check the named fields and request schema.', stale_revision: 'Reload the workspace and retry with its current revision.', persistence_failed: 'Local storage failed; retry after checking available disk space.', unavailable: 'The requested service is unavailable; retry after it recovers.', service_offline: 'The local service is unavailable; restart it and retry.', protocol_mismatch: 'The configured renderer protocol is unsupported.', render_failed: 'Rendering failed; correct the draft inputs and retry.', rate_limited: 'A request is already running; retry shortly.', provider_denied: 'The request was denied; check local authorization and configuration.' }
+  const messages = { invalid_input: 'Check the named fields and request schema.', stale_revision: 'Reload the workspace and retry with its current revision.', persistence_failed: 'Local storage failed; retry after checking available disk space.', unavailable: 'The requested service is unavailable; retry after it recovers.', service_offline: 'The local service is unavailable; restart it and retry.', protocol_mismatch: 'The configured renderer protocol is unsupported.', render_failed: 'Rendering failed; correct the draft inputs and retry.', rate_limited: 'A request is already running; retry shortly.', provider_denied: 'The request was denied; check local authorization and configuration.', channel_unmatched: 'The selected provider account is unavailable; refresh integrations and select again.', channel_unconfigured: 'Select one or more provider accounts for this app before syncing.', channel_not_approved: 'The selected provider account requires approval before syncing.' }
   response(res, status, { error: { code, message: messages[code] ?? 'Request could not be completed safely.', retryable: retryableCodes.has(code) } }, origin)
 }
 
@@ -113,6 +113,7 @@ export function createService({ actions, token, allowedOrigin = 'null' }) {
     if (req.method === 'GET' && jobMatch) return invoke(() => actions.job(decodeURIComponent(jobMatch[1])))
     if (req.method === 'POST' && retryMatch) return invoke(() => actions.retry(decodeURIComponent(retryMatch[1])), 202)
     if (req.method === 'POST' && url.pathname === '/api/postiz/sync') return invoke(() => actions.sync(body))
+    if (req.method === 'POST' && url.pathname === '/api/postiz/bind') return invoke(() => actions.bindPostizIntegrations(body))
     if (req.method === 'POST' && url.pathname === '/api/outcomes/import') return invoke(() => actions.importOutcomes(body))
     errorResponse(res, 404, 'invalid_input', corsOrigin)
   })

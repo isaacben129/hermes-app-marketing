@@ -88,7 +88,7 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
   }
   const persist = async (type, app, payload, revision) => workspace.record({ type, app, payload, expectedRevision: revision })
 
-  return {
+  const actions = {
     health,
     workspace: app => { if (!safeApp(app)) throw Object.assign(new TypeError('app is required'), { code: 'invalid_input' }); return workspace.load(app) },
     saveDraft: async input => {
@@ -206,6 +206,22 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
     },
     renderDraft,
     exportDraft,
+    bindPostizIntegrations: async ({ app, integrationIds } = {}) => {
+      if (!safeApp(app)) throw Object.assign(new TypeError('app is invalid'), { code: 'invalid_input' })
+      const ids = Array.isArray(integrationIds) ? integrationIds : [integrationIds]
+      if (!ids.length || ids.length > 100 || ids.some(id => !safeId(id)) || new Set(ids).size !== ids.length) throw Object.assign(new TypeError('valid unique integration IDs are required'), { code: 'invalid_input' })
+      if (!postizReader) throw Object.assign(new Error('Postiz unavailable'), { code: 'unavailable' })
+      const state = await workspace.load(app)
+      const profile = state.profiles.find(item => item.appId === app.toLowerCase())
+      if (!profile) throw Object.assign(new Error('App profile is not configured'), { code: 'invalid_input' })
+      const available = await postizReader.listIntegrations()
+      if (ids.some(id => !available.some(item => item.id === id && item.disabled !== true))) throw Object.assign(new Error('Integration is not available'), { code: 'channel_unmatched' })
+      const config = structuredClone(profile.configuration)
+      const current = config.channel.value
+      const previous = Array.isArray(current) ? current : typeof current === 'string' ? [current] : current?.integrationIds ?? (current?.integrationId ? [current.integrationId] : [])
+      config.channel = { ...config.channel, value: [...new Set([...previous, ...ids])], status: 'pending', evidenceRef: null, reviewer: null, reviewedAt: null }
+      return actions.saveProfile({ app, expectedRevision: state.revision, profile: { ...profile, configuration: config } })
+    },
     sync: async ({ app, window, days } = {}) => {
       if (!safeApp(app)) throw Object.assign(new TypeError('app is required'), { code: 'invalid_input' })
       if (!validWindow(window) || !Number.isInteger(days) || days < 1 || days > 365) throw Object.assign(new TypeError('window and days are invalid'), { code: 'invalid_input' })
@@ -219,34 +235,27 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
       try {
         const profile = state.profiles.find(item => item.appId === app.toLowerCase())
         const channelConfig = profile?.configuration?.channel
-        const configuredChannel = channelConfig?.value
-        const channelId = typeof configuredChannel === 'string' ? configuredChannel : configuredChannel?.integrationId
-        if (!channelId && app.toLowerCase() !== 'cherry') {
-          const [integrations, listedPosts] = await Promise.all([postizReader.listIntegrations(), postizReader.listPosts({ window })])
+        const configured = channelConfig?.value
+        const channelIds = Array.isArray(configured) ? configured : configured?.integrationIds ?? (configured?.integrationId ? [configured.integrationId] : typeof configured === 'string' ? [configured] : [])
+        if (!channelIds.length || channelConfig?.status !== 'approved') {
           const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced' && event.payload?.app === app)?.payload?.syncedAt ?? null
-          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), integrations, listedPosts, lastSuccess, error: { code: 'channel_unconfigured' } }
-        }
-        if (!channelId) {
-          const cherry = app.toLowerCase() === 'cherry'
-          let integrations = [], listedPosts = []
-          if (cherry) [integrations, listedPosts] = await Promise.all([postizReader.listIntegrations(), postizReader.listPosts({ window })])
-          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), ...(cherry ? { integrations: integrations.filter(item => item.platform === 'tiktok' || item.name === 'cherrysocialanxiety') } : {}), ...(cherry ? { listedPosts } : {}), lastSuccess, error: { code: 'channel_unconfigured' } }
-        }
-        if (channelConfig?.status !== 'approved') {
-          const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced' && event.payload?.app === app)?.payload?.syncedAt ?? null
-          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), lastSuccess, error: { code: 'channel_not_approved' } }
+          const approvalCode = channelConfig?.status === 'pending' || channelConfig?.status === 'rejected' ? 'channel_not_approved' : 'channel_unconfigured'
+          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), error: { code: approvalCode }, lastSuccess }
         }
         const [integrations, listedPosts] = await Promise.all([postizReader.listIntegrations(), postizReader.listPosts({ window })])
-        const platformMetrics = typeof postizReader.readPlatformMetrics === 'function' ? await postizReader.readPlatformMetrics({ integrationId: channelId, days, appId: app.toLowerCase(), scopedIntegrationId: channelId }) : { status: 'unavailable', observations: [], error: { code: 'unavailable' } }
-        const integration = integrations.find(item => item.id === channelId && item.disabled !== true)
-        if (!integration) {
-          const lastSuccess = [...await ledger.getEvents()].reverse().find(event => event.type === 'postiz.synced' && event.payload?.app === app)?.payload?.syncedAt ?? null
-          return { status: 'blocked', posts: state.posts ?? [], observations: (state.observations ?? []).filter(item => item.source === 'postiz'), lastSuccess, error: { code: 'channel_unmatched' } }
+        const validIds = [...new Set(channelIds.filter(safeId))]
+        const enabledIntegrations = integrations.filter(item => validIds.includes(item.id) && item.disabled !== true)
+        if (enabledIntegrations.length !== validIds.length) throw Object.assign(new Error('One or more selected Postiz integrations are unavailable'), { code: 'channel_unmatched' })
+        const matchedPosts = listedPosts.filter(post => enabledIntegrations.some(item => item.id === post.integration?.id))
+        const posts = matchedPosts.map(post => ({ id: post.id, content: post.content, publishDate: post.publishDate, releaseURL: post.releaseURL, state: post.state, integration: post.integration, channelMatch: { status: 'matched', profileIntegrationIds: validIds, providerIntegrationId: post.integration.id }, syncedAt: clock() }))
+        const observations = []
+        const platformStatuses = []
+        for (const integration of enabledIntegrations) {
+          const result = typeof postizReader.readPlatformMetrics === 'function' ? await postizReader.readPlatformMetrics({ integrationId: integration.id, days, appId: app.toLowerCase() }) : { status: 'unavailable', observations: [] }
+          platformStatuses.push(result.status)
+          if (result.status === 'available' || result.status === 'stale') observations.push(...result.observations)
         }
-        const matchedPosts = listedPosts.filter(post => post.integration?.id === integration.id)
-        const posts = matchedPosts.map(post => ({ id: post.id, content: post.content, publishDate: post.publishDate, releaseURL: post.releaseURL, state: post.state, integration: post.integration, channelMatch: { status: 'matched', profileIntegrationId: integration.id, providerIntegrationId: post.integration.id }, syncedAt: clock() }))
-        const observations = [...(platformMetrics.status === 'available' || platformMetrics.status === 'stale' ? platformMetrics.observations : [])]
-        let staleMetrics = platformMetrics.status === 'stale'
+        let staleMetrics = platformStatuses.includes('stale') || platformStatuses.includes('unavailable')
         for (const post of posts) {
           const metrics = await postizReader.readMetrics({ postId: post.id, days, appId: app.toLowerCase(), creativeRevision: null })
           if (metrics.status === 'unavailable') continue
@@ -254,8 +263,8 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
           if (metrics.status === 'available' || metrics.status === 'stale') observations.push(...metrics.observations.map(item => ({ ...item, creativeRevision: Number.isSafeInteger(item.creativeRevision) && item.creativeRevision >= 0 ? item.creativeRevision : null, attribution: item.attribution ?? { status: 'unmapped' }, ...(metrics.status === 'stale' ? { status: 'stale' } : {}) })))
         }
         const unmatchedCount = listedPosts.length - matchedPosts.length, syncedAt = clock()
-        const revision = await persist('postiz.synced', app, { posts, observations, unmatchedCount, syncedAt, degraded: staleMetrics || platformMetrics.status === 'unavailable', platformAnalyticsStatus: platformMetrics.status }, state.revision)
-        return { status: 'connected', posts, observations, platformAnalyticsStatus: platformMetrics.status, unmatchedCount, lastSuccess: syncedAt, revision }
+        const revision = await persist('postiz.synced', app, { posts, observations, unmatchedCount, syncedAt, degraded: staleMetrics, platformAnalyticsStatus: platformStatuses.every(status => status === 'available') ? 'available' : platformStatuses.includes('stale') ? 'stale' : 'unavailable' }, state.revision)
+        return { status: 'connected', posts, observations, platformAnalyticsStatus: platformStatuses.every(status => status === 'available') ? 'available' : platformStatuses.includes('stale') ? 'stale' : 'unavailable', unmatchedCount, lastSuccess: syncedAt, revision }
       } catch (error) {
         const code = error.code ?? 'unavailable'
         try { await persist('postiz.sync_failed', app, { errorCode: code, failedAt: clock() }, state.revision) } catch {}
@@ -278,4 +287,5 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
       return { revision, observations }
     }
   }
+  return actions
 }

@@ -8,7 +8,7 @@ If the UI uses a network origin, configure that exact origin. The UI accepts loo
 
 ## Postiz and outcomes
 
-Postiz remains disconnected unless the service process is configured with `POSTIZ_BASE_URL` (ending in `/api/public/v1` or the official `https://api.postiz.com/public/v1`, HTTPS required except loopback) and `POSTIZ_API_KEY`. The adapter is GET-only. Configure these values in the service process's protected environment; never place provider credentials in plugin storage, request bodies, logs, source references, or exported artifacts. The provider credential and live account access were not verified here.
+Postiz remains disconnected unless the service process has `POSTIZ_BASE_URL` and `POSTIZ_API_KEY`. The optional local launcher can load those values from one central owner-only secrets file outside the repository, selected through `HERMES_MARKETING_SECRETS_FILE`; Linux/WSL mode must be `0600`. The suggested `/opt/data/.config/hermes/marketing-secrets.env` is a path you may create—not a built-in Hermes vault or verified existing location. Do not add per-project `.env` files, put credentials in plugin/workspace data, or commit secrets. All Postiz calls are GET-only. Credential access has not yet been verified.
 
 Only a read-only Postiz sync is exposed in the UI. Platform engagement is not an app outcome. Import owner-approved aggregate outcome rows only after the profile has approved event definitions, privacy settings, and an attribution policy. Missing, stale, suppressed, unsupported, and unconfigured data must not be treated as zero.
 

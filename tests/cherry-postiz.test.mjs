@@ -19,7 +19,7 @@ test('Cherry analytics uses its selected TikTok integration, preserves metric pr
   await assert.rejects(analytics.read({ days: 30, appId: 'fapcountapp' }), /Cherry/)
 })
 
-test('Cherry Postiz analytics reader fails closed for other integration ids', async () => {
-  const reader = createPostizReader({ transport: async () => [] })
-  await assert.rejects(reader.readPlatformMetrics({ integrationId: 'other', days: 30, appId: 'cherry' }), /scope/i)
+test('Cherry Postiz analytics reader permits only its selected channel, not arbitrary integration IDs', async () => {
+  const reader = createCherryPostizAnalytics({ transport: async () => [] })
+  await assert.rejects(reader.read({ days: 30, appId: 'fapcountapp' }), /Cherry/)
 })

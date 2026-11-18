@@ -7,6 +7,7 @@ export function createPostizReader({ transport, clock = () => new Date().toISOSt
   if (typeof transport !== 'function') throw new TypeError('transport is required')
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 2) throw new TypeError('maxAttempts must be 1 or 2')
   const cachedMetrics = new Map()
+  const safeId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(value)
   const request = async (path, query = {}) => {
     let lastError
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -45,7 +46,7 @@ export function createPostizReader({ transport, clock = () => new Date().toISOSt
         if (!seen.has(post.id)) {
           seen.add(post.id)
           const integration = object(post.integration) ? {
-            id: typeof post.integration.id === 'string' ? post.integration.id : null,
+            id: typeof post.integration.id === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(post.integration.id) ? post.integration.id : null,
             providerIdentifier: typeof post.integration.providerIdentifier === 'string' ? post.integration.providerIdentifier : null,
             name: typeof post.integration.name === 'string' ? post.integration.name : null,
             picture: typeof post.integration.picture === 'string' ? post.integration.picture : null
@@ -88,8 +89,8 @@ export function createPostizReader({ transport, clock = () => new Date().toISOSt
       return { status: stale ? 'stale' : 'unavailable', observations: stale ?? [], error: safeError(error) }
     }
   }
-  const readPlatformMetrics = async ({ integrationId, days, appId, scopedIntegrationId } = {}) => {
-    if (typeof scopedIntegrationId !== 'string' || !scopedIntegrationId || integrationId !== scopedIntegrationId || !Number.isInteger(days) || days < 1 || days > 365 || typeof appId !== 'string' || !appId) throw Object.assign(new TypeError('valid scoped platform analytics scope is required'), { code: 'invalid_input' })
+  const readPlatformMetrics = async ({ integrationId, days, appId } = {}) => {
+    if (!safeId(integrationId) || !Number.isInteger(days) || days < 1 || days > 365 || typeof appId !== 'string' || !/^[a-z0-9_-]{1,64}$/i.test(appId)) throw Object.assign(new TypeError('valid integration analytics scope is required'), { code: 'invalid_input' })
     const key = `integration:${integrationId}:${days}:${appId}`
     try {
       const value = await request(`/analytics/${integrationId}`, { date: String(days) })
@@ -126,11 +127,12 @@ export function createDefaultPostizReader({ env = process.env, fetchImpl = fetch
   const transport = async ({ method, path, query }) => {
     const isAnalytics = /^\/analytics\/post\/[A-Za-z0-9_-]+$/.test(path) || /^\/analytics\/[A-Za-z0-9_-]+$/.test(path)
     if (method !== 'GET' || !(allowedPaths.has(path) || isAnalytics)) throw Object.assign(new Error('Route denied'), { status: 403 })
-    const url = new URL(`${base.href.replace(/\/$/, '')}${path}`)
+    const normalizedPath = path
+    const url = new URL(`${base.href.replace(/\/$/, '')}${normalizedPath}`)
     for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, String(value))
     const response = await fetchImpl(url, { method: 'GET', headers: { Authorization: apiKey }, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) })
     if (!response.ok) throw Object.assign(new Error('Provider request failed'), { status: response.status, retryAfterMs: Number(response.headers.get('retry-after')) * 1000 })
     return response.json()
   }
-  return createPostizReader({ transport })
+  return { ...createPostizReader({ transport }), transport }
 }
