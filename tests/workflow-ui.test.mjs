@@ -51,6 +51,30 @@ test('registered workflow connects, saves with CAS, then renders only a saved re
   assert.equal(renderer.root.findByProps({ alt: 'Rendered slide 2' }).props.alt, 'Rendered slide 2')
 })
 
+test('disconnected service does not block creating an unsaved local draft', async t => {
+  const loaded = await loadPlugin(); t.after(loaded.cleanup)
+  const registry = []; const values = new Map()
+  const ctx = { storage: { get: (k, fallback) => values.has(k) ? values.get(k) : fallback, set: (k, v) => values.set(k, v) }, register: item => registry.push(item) }
+  loaded.default.register(ctx)
+  const route = registry.find(x => x.id === 'page'); assert.ok(route)
+  const oldFetch = globalThis.fetch
+  globalThis.fetch = async () => { throw new TypeError('offline-for-draft-create-test') }
+  t.after(() => { globalThis.fetch = oldFetch })
+  let renderer
+  await act(async () => { renderer = TestRenderer.create(route.render()) })
+  const buttons = () => renderer.root.findAllByType('button')
+  const click = async name => {
+    const button = buttons().find(node => node.children.join('') === name)
+    assert.ok(button, `missing button ${name}`)
+    assert.equal(button.props.disabled, false, `${name} should be usable while disconnected`)
+    await act(async () => { button.props.onClick(); await tick() })
+  }
+  await click('New draft')
+  assert.match(JSON.stringify(renderer.toJSON()), /Untitled Cherry draft/)
+  assert.match(JSON.stringify(renderer.toJSON()), /local until saved to the service/i)
+  assert.equal(values.has('serviceToken'), false)
+})
+
 test('401 and CAS conflict are visible and a conflict preserves the unsaved draft', async t => {
   const loaded = await loadPlugin(); t.after(loaded.cleanup)
   const registry = []; const values = new Map(); loaded.default.register({ storage: { get: (k, fallback) => values.has(k) ? values.get(k) : fallback, set: (k,v) => values.set(k,v) }, register: x => registry.push(x) })
