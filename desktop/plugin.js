@@ -1,5 +1,5 @@
 // src/desktop/entry.js
-import React3, { useEffect, useMemo, useState } from "react";
+import React4, { useEffect as useEffect2, useMemo, useState as useState2 } from "react";
 import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { Badge, Button, EmptyState, PALETTE_AREA, ROUTES_AREA, SIDEBAR_NAV_AREA, host } from "@hermes/plugin-sdk";
 
@@ -185,8 +185,133 @@ function JobDetail({ job = null, onRetry, onPause, onResume }) {
   );
 }
 
-// src/desktop/entry.js
+// src/ui/CreativeGallery.js
+import React3, { useEffect, useState } from "react";
 var h3 = React3.createElement;
+function CreativeCover({ api, item }) {
+  const [src, setSrc] = useState("");
+  const [node, setNode] = useState(null);
+  useEffect(() => {
+    if (!node) return;
+    let live = true;
+    const load = () => api(`/creative-previews/${encodeURIComponent(item.runId)}/${encodeURIComponent(item.id)}/slides/0`).then((x) => {
+      if (live) setSrc(x.dataUrl);
+    }).catch(() => {
+    });
+    if (typeof IntersectionObserver === "undefined") {
+      load();
+      return () => {
+        live = false;
+      };
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        observer.disconnect();
+        load();
+      }
+    });
+    observer.observe(node);
+    return () => {
+      live = false;
+      observer.disconnect();
+    };
+  }, [node, item.id, item.runId]);
+  return src ? h3("img", { ref: setNode, alt: "", loading: "lazy", src, style: { width: "100%", maxHeight: 180, objectFit: "contain" } }) : h3("span", { ref: setNode, role: "status" }, "Saved cover preview");
+}
+function CreativeGallery({ api, openDraft }) {
+  const [items, setItems] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [slide, setSlide] = useState(0);
+  const [image, setImage] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let live = true;
+    api("/creative-previews?app=Cherry").then((x) => {
+      if (live) setItems(x.creatives || []);
+    }).catch((e) => {
+      if (live) setError(e.message || "Creative gallery unavailable.");
+    }).finally(() => {
+      if (live) setLoading(false);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  useEffect(() => {
+    let live = true;
+    setImage(null);
+    if (selected) api(`/creative-previews/${encodeURIComponent(selected.runId)}/${encodeURIComponent(selected.id)}/slides/${slide}`).then((x) => {
+      if (live) setImage(x.dataUrl);
+    }).catch((e) => {
+      if (live) setError(e.message || "Rendered slide unavailable.");
+    });
+    return () => {
+      live = false;
+    };
+  }, [selected, slide]);
+  const panel4 = { border: "1px solid var(--ui-stroke-secondary)", borderRadius: 6, padding: 14, display: "grid", gap: 10 };
+  if (loading) return h3("section", { role: "status" }, "Loading generated creatives\u2026");
+  if (error) return h3("section", { role: "alert" }, `Generated creatives are unavailable: ${error}`);
+  if (!items.length) return h3("section", { style: panel4 }, h3("h2", null, "Generated creatives"), h3("p", null, "No saved rendered Cherry creatives are available for this profile."));
+  if (!selected) return h3(
+    "section",
+    { style: { display: "grid", gap: 14 } },
+    h3("h2", null, "Generated creatives"),
+    h3(
+      "div",
+      { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 } },
+      ...items.map((item) => h3(
+        "button",
+        { key: item.id, onClick: () => {
+          setSelected(item);
+          setSlide(0);
+        }, style: { ...panel4, color: "inherit", textAlign: "left", cursor: "pointer" } },
+        h3(CreativeCover, { api, item }),
+        h3("strong", null, item.title),
+        h3("span", null, `Unapproved \xB7 ${item.status}`),
+        h3("span", null, `${item.slideCount} rendered slides \xB7 ${item.iteration}`)
+      ))
+    )
+  );
+  const buttons = selected.slides.map((_, i) => h3("button", { key: i, onClick: () => setSlide(i), "aria-label": `Show slide ${i + 1}`, "aria-current": slide === i ? "true" : void 0 }, `Slide ${i + 1}`));
+  const reviews = (selected.qualityReviews || []).map((r, i) => h3("li", { key: i }, `${r.dimension}: ${r.score ?? "not scored"}${r.rationale ? ` \u2014 ${r.rationale}` : ""}`));
+  const blockers = (selected.hardBlockers || []).map((b, i) => h3("p", { key: i }, `Blocker: ${typeof b === "string" ? b : JSON.stringify(b)}`));
+  return h3(
+    "section",
+    { style: { display: "grid", gap: 14 } },
+    h3("h2", null, "Generated creatives"),
+    h3(
+      "article",
+      { style: panel4 },
+      h3("h3", null, selected.title),
+      h3("span", { role: "status" }, `Unapproved \xB7 ${selected.status} \xB7 ${selected.iteration}`),
+      image ? h3("img", { alt: `${selected.title}, slide ${slide + 1}`, src: image, style: { maxHeight: "65vh", maxWidth: "100%", objectFit: "contain", justifySelf: "center" } }) : h3("span", { role: "status" }, "Loading rendered slide\u2026"),
+      h3("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, ...buttons, h3("button", { onClick: () => setSlide(Math.max(0, slide - 1)), disabled: slide === 0 }, "Previous"), h3("button", { onClick: () => setSlide(Math.min(selected.slideCount - 1, slide + 1)), disabled: slide >= selected.slideCount - 1 }, "Next")),
+      h3("h4", null, "Critique scores"),
+      h3("ul", null, ...reviews),
+      ...blockers,
+      h3("button", { onClick: async () => {
+        try {
+          const workspace = await api("/api/workspace?app=Cherry");
+          const draft = workspace.drafts?.find((item) => item.id === selected.draftId);
+          if (!draft) throw new Error("No saved editable draft is linked to this generated result.");
+          openDraft(draft);
+        } catch (e) {
+          setError(e.message || "Saved draft is unavailable.");
+        }
+      } }, "Edit draft"),
+      h3("button", { onClick: () => {
+        setSelected(null);
+        setSlide(0);
+        setError("");
+      } }, "Back to creatives")
+    )
+  );
+}
+
+// src/desktop/entry.js
+var h4 = React4.createElement;
 var urlDefault = "http://127.0.0.1:8764";
 var ROUTE = "/marketing-system";
 var selectedImageData = /* @__PURE__ */ new Map();
@@ -209,31 +334,31 @@ var localServiceOrigin = (value) => {
   return parsed.origin;
 };
 function MarketingPage({ ctx }) {
-  const [base, setBase] = useState(() => ctx.storage.get("serviceUrl", urlDefault));
-  const [token, setToken] = useState(() => ctx.storage.get("serviceToken", ""));
-  const [connected, setConnected] = useState(false);
-  const [workspace, setWorkspace] = useState(null);
-  const [selectedApp, setSelectedApp] = useState("Cherry");
-  const [health, setHealth] = useState(null);
-  const [draft, setDraft] = useState(null);
-  const [dirty, setDirty] = useState(false);
-  const [view, setView] = useState("Overview");
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
-  const [rendered, setRendered] = useState(null);
-  const [active, setActive] = useState(0);
-  const [job, setJob] = useState(null);
-  const [jobs, setJobs] = useState([]);
-  const [imageChoices, setImageChoices] = useState(null);
-  const [agentRun, setAgentRun] = useState(null);
-  const [agentRuns, setAgentRuns] = useState([]);
-  const [metricsText, setMetricsText] = useState("");
-  const [profileText, setProfileText] = useState("");
-  const [experimentText, setExperimentText] = useState('{"name":"Cherry concept test","policyVersion":"unconfigured"}');
-  const [observationText, setObservationText] = useState("[]");
-  const generation = React3.useRef(0);
-  const imageReadback = React3.useRef(0);
+  const [base, setBase] = useState2(() => ctx.storage.get("serviceUrl", urlDefault));
+  const [token, setToken] = useState2(() => ctx.storage.get("serviceToken", ""));
+  const [connected, setConnected] = useState2(false);
+  const [workspace, setWorkspace] = useState2(null);
+  const [selectedApp, setSelectedApp] = useState2("Cherry");
+  const [health, setHealth] = useState2(null);
+  const [draft, setDraft] = useState2(null);
+  const [dirty, setDirty] = useState2(false);
+  const [view, setView] = useState2("Overview");
+  const [busy, setBusy] = useState2(false);
+  const [notice, setNotice] = useState2("");
+  const [error, setError] = useState2("");
+  const [rendered, setRendered] = useState2(null);
+  const [active, setActive] = useState2(0);
+  const [job, setJob] = useState2(null);
+  const [jobs, setJobs] = useState2([]);
+  const [imageChoices, setImageChoices] = useState2(null);
+  const [agentRun, setAgentRun] = useState2(null);
+  const [agentRuns, setAgentRuns] = useState2([]);
+  const [metricsText, setMetricsText] = useState2("");
+  const [profileText, setProfileText] = useState2("");
+  const [experimentText, setExperimentText] = useState2('{"name":"Cherry concept test","policyVersion":"unconfigured"}');
+  const [observationText, setObservationText] = useState2("[]");
+  const generation = React4.useRef(0);
+  const imageReadback = React4.useRef(0);
   const headers = () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
   const nativeBackend = typeof ctx.rest === "function";
   const api = async (path, init = {}) => {
@@ -292,7 +417,7 @@ function MarketingPage({ ctx }) {
       if (request === generation.current) setBusy(false);
     }
   };
-  useEffect(() => {
+  useEffect2(() => {
     if (nativeBackend || ctx.storage.get("serviceUrl") && ctx.storage.get("serviceToken")) connect();
     return () => {
       generation.current++;
@@ -489,7 +614,7 @@ function MarketingPage({ ctx }) {
       setError(`Saved agent run details are unavailable: ${e.message || "request failed."}`);
     }
   };
-  useEffect(() => {
+  useEffect2(() => {
     if (!connected || !agentRun?.runId || agentRun.status !== "running") return;
     const timer = setInterval(() => {
       refreshAgentRun();
@@ -565,12 +690,12 @@ function MarketingPage({ ctx }) {
       setError(e.message);
     }
   };
-  const nav = ["Overview", "Slideshows", "Experiments", "Outcomes", "System health", "App settings"];
-  const button = (text2, action, disabled = false) => h3(Button, { key: text2, onClick: action, disabled: disabled || busy, variant: "outline" }, text2);
-  const input = (title, value, onChange, multiline = false) => h3("label", { style: labelStyle, key: title }, title, multiline ? h3("textarea", { "aria-label": title, value: value ?? "", onChange: (e) => onChange(e.target.value), rows: 3, style: fieldStyle }) : h3("input", { type: title.startsWith("Bearer token") ? "password" : "text", "aria-label": title, value: value ?? "", onChange: (e) => onChange(e.target.value), style: fieldStyle }));
+  const nav = ["Overview", "Creatives", "Slideshows", "Experiments", "Outcomes", "System health", "App settings"];
+  const button = (text2, action, disabled = false) => h4(Button, { key: text2, onClick: action, disabled: disabled || busy, variant: "outline" }, text2);
+  const input = (title, value, onChange, multiline = false) => h4("label", { style: labelStyle, key: title }, title, multiline ? h4("textarea", { "aria-label": title, value: value ?? "", onChange: (e) => onChange(e.target.value), rows: 3, style: fieldStyle }) : h4("input", { type: title.startsWith("Bearer token") ? "password" : "text", "aria-label": title, value: value ?? "", onChange: (e) => onChange(e.target.value), style: fieldStyle }));
   const records = workspace?.drafts || [];
-  const thumbnails = (rendered?.slides || []).map((s, i) => h3("button", { key: i, "aria-label": `Show slide ${i + 1}`, onClick: () => setActive(i), "aria-current": active === i ? "true" : void 0, style: { width: 52, height: 92, flex: "0 0 auto", padding: 0 } }, h3("img", { alt: "", src: `data:image/png;base64,${s.pngBase64 || s.png || ""}`, style: { width: "100%", height: "100%", objectFit: "contain" } })));
-  const renderPanel = rendered && h3("section", { style: panel3 }, h3("h3", null, "Portrait preview"), h3("img", { alt: `Rendered slide ${active + 1}`, src: `data:image/png;base64,${rendered.slides?.[active]?.pngBase64 || rendered.slides?.[active]?.png || ""}`, style: { height: "min(62vh, 720px)", maxWidth: "100%", objectFit: "contain" } }), h3("div", { style: { display: "flex", gap: 8, overflowX: "auto" }, role: "list", "aria-label": "Rendered slide thumbnails" }, thumbnails));
+  const thumbnails = (rendered?.slides || []).map((s, i) => h4("button", { key: i, "aria-label": `Show slide ${i + 1}`, onClick: () => setActive(i), "aria-current": active === i ? "true" : void 0, style: { width: 52, height: 92, flex: "0 0 auto", padding: 0 } }, h4("img", { alt: "", src: `data:image/png;base64,${s.pngBase64 || s.png || ""}`, style: { width: "100%", height: "100%", objectFit: "contain" } })));
+  const renderPanel = rendered && h4("section", { style: panel3 }, h4("h3", null, "Portrait preview"), h4("img", { alt: `Rendered slide ${active + 1}`, src: `data:image/png;base64,${rendered.slides?.[active]?.pngBase64 || rendered.slides?.[active]?.png || ""}`, style: { height: "min(62vh, 720px)", maxWidth: "100%", objectFit: "contain" } }), h4("div", { style: { display: "flex", gap: 8, overflowX: "auto" }, role: "list", "aria-label": "Rendered slide thumbnails" }, thumbnails));
   const SYNTHETIC_DEMO = {
     id: "synthetic-demo-preview",
     title: "Synthetic Demo \xB7 Cherry Concept Campaign",
@@ -587,7 +712,7 @@ function MarketingPage({ ctx }) {
   };
   const SyntheticDemoBanner = () => {
     const slideCards = SYNTHETIC_DEMO.slides.map(
-      (slide, i) => h3(
+      (slide, i) => h4(
         "article",
         {
           key: i,
@@ -601,16 +726,16 @@ function MarketingPage({ ctx }) {
             minHeight: 100
           }
         },
-        h3(
+        h4(
           "div",
           { style: { display: "flex", alignItems: "center", gap: 8 } },
-          h3("span", { style: { width: 24, height: 24, borderRadius: "50%", background: "var(--ui-accent, #0066cc)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: 700, flexShrink: 0 } }, String(i + 1)),
-          h3("h4", { style: { margin: 0, fontSize: "0.9rem", fontWeight: 600 } }, slide.headline)
+          h4("span", { style: { width: 24, height: 24, borderRadius: "50%", background: "var(--ui-accent, #0066cc)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: 700, flexShrink: 0 } }, String(i + 1)),
+          h4("h4", { style: { margin: 0, fontSize: "0.9rem", fontWeight: 600 } }, slide.headline)
         ),
-        h3("p", { style: { margin: 0, color: "var(--ui-text-secondary)", fontSize: "0.85rem", lineHeight: 1.4 } }, slide.body)
+        h4("p", { style: { margin: 0, color: "var(--ui-text-secondary)", fontSize: "0.85rem", lineHeight: 1.4 } }, slide.body)
       )
     );
-    return h3(
+    return h4(
       "section",
       {
         style: {
@@ -621,26 +746,26 @@ function MarketingPage({ ctx }) {
           overflow: "hidden"
         }
       },
-      h3("div", { style: { position: "absolute", top: -20, right: -20, width: 120, height: 120, borderRadius: "50%", background: "rgba(0,102,204,0.05)", pointerEvents: "none" } }),
-      h3(
+      h4("div", { style: { position: "absolute", top: -20, right: -20, width: 120, height: 120, borderRadius: "50%", background: "rgba(0,102,204,0.05)", pointerEvents: "none" } }),
+      h4(
         "header",
         { style: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 } },
-        h3("span", { style: { display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--ui-accent, #0066cc)", color: "#fff", borderRadius: 999, fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" } }, "\u26A0 SYNTHETIC DEMO"),
-        h3("span", { style: { color: "var(--ui-text-secondary)", fontSize: "0.85rem" } }, "Read-only preview \u2014 no data is saved, synced, or sent to the service")
+        h4("span", { style: { display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--ui-accent, #0066cc)", color: "#fff", borderRadius: 999, fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" } }, "\u26A0 SYNTHETIC DEMO"),
+        h4("span", { style: { color: "var(--ui-text-secondary)", fontSize: "0.85rem" } }, "Read-only preview \u2014 no data is saved, synced, or sent to the service")
       ),
-      h3(
+      h4(
         "p",
         { style: { margin: 0, color: "var(--ui-text-primary)", fontSize: "0.95rem", lineHeight: 1.5 } },
         "This preview demonstrates the Marketing Overview layout with realistic campaign data. ",
-        h3("strong", null, "All content is synthetic and fixture-labeled."),
+        h4("strong", null, "All content is synthetic and fixture-labeled."),
         " It never enters the service, ledger, local storage, or any persistent record. Use ",
-        h3("code", { style: { background: "var(--ui-bg-tertiary)", padding: "2px 6px", borderRadius: 4 } }, "New draft"),
+        h4("code", { style: { background: "var(--ui-bg-tertiary)", padding: "2px 6px", borderRadius: 4 } }, "New draft"),
         " to create a real, editable draft."
       ),
-      h3("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 12 } }, ...slideCards)
+      h4("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 12 } }, ...slideCards)
     );
   };
-  const MetricCard = ({ label, value, status }) => h3("section", {
+  const MetricCard = ({ label, value, status }) => h4("section", {
     style: {
       ...panel3,
       display: "grid",
@@ -648,8 +773,8 @@ function MarketingPage({ ctx }) {
       textAlign: "center",
       padding: 16
     }
-  }, h3("div", { style: { fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ui-text-tertiary)", fontWeight: 600 } }, label), h3("div", { style: { fontSize: "clamp(1.75rem, 4vw, 2.5rem)", fontWeight: 700, color: status === "unavailable" ? "var(--ui-text-tertiary)" : "var(--ui-text-primary)", lineHeight: 1.1 } }, value), h3("div", { style: { fontSize: "0.7rem", color: status === "unavailable" ? "var(--ui-text-tertiary)" : "var(--ui-accent, #0066cc)", textTransform: "uppercase", letterSpacing: "0.05em" } }, status));
-  const DraftListItem = ({ item, onClick }) => h3("button", {
+  }, h4("div", { style: { fontSize: "0.75rem", textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ui-text-tertiary)", fontWeight: 600 } }, label), h4("div", { style: { fontSize: "clamp(1.75rem, 4vw, 2.5rem)", fontWeight: 700, color: status === "unavailable" ? "var(--ui-text-tertiary)" : "var(--ui-text-primary)", lineHeight: 1.1 } }, value), h4("div", { style: { fontSize: "0.7rem", color: status === "unavailable" ? "var(--ui-text-tertiary)" : "var(--ui-accent, #0066cc)", textTransform: "uppercase", letterSpacing: "0.05em" } }, status));
+  const DraftListItem = ({ item, onClick }) => h4("button", {
     key: item.id,
     onClick,
     style: {
@@ -671,9 +796,10 @@ function MarketingPage({ ctx }) {
       e.target.style.background = "";
       e.target.style.borderColor = "var(--ui-stroke-secondary)";
     }
-  }, h3("div", null, h3("div", { style: { fontWeight: 500, fontSize: "0.95rem" } }, item.title || item.id), h3("div", { style: { fontSize: "0.8rem", color: "var(--ui-text-tertiary)" } }, `Revision ${item.revision || workspace?.revision || "\u2014"} \xB7 ${item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : "No date"}`)), h3("span", { style: { padding: "3px 8px", borderRadius: 999, fontSize: "0.65rem", fontWeight: 600, textTransform: "uppercase", background: item.stage === "review" ? "rgba(255,165,0,0.15)" : item.stage === "published" ? "rgba(34,197,94,0.15)" : "var(--ui-bg-tertiary)", color: item.stage === "review" ? "#cc8800" : item.stage === "published" ? "#16a34a" : "var(--ui-text-secondary)", border: "1px solid " + (item.stage === "review" ? "rgba(255,165,0,0.3)" : item.stage === "published" ? "rgba(34,197,94,0.3)" : "var(--ui-stroke-tertiary)") } }, item.stage || "draft"));
+  }, h4("div", null, h4("div", { style: { fontWeight: 500, fontSize: "0.95rem" } }, item.title || item.id), h4("div", { style: { fontSize: "0.8rem", color: "var(--ui-text-tertiary)" } }, `Revision ${item.revision || workspace?.revision || "\u2014"} \xB7 ${item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : "No date"}`)), h4("span", { style: { padding: "3px 8px", borderRadius: 999, fontSize: "0.65rem", fontWeight: 600, textTransform: "uppercase", background: item.stage === "review" ? "rgba(255,165,0,0.15)" : item.stage === "published" ? "rgba(34,197,94,0.15)" : "var(--ui-bg-tertiary)", color: item.stage === "review" ? "#cc8800" : item.stage === "published" ? "#16a34a" : "var(--ui-text-secondary)", border: "1px solid " + (item.stage === "review" ? "rgba(255,165,0,0.3)" : item.stage === "published" ? "rgba(34,197,94,0.3)" : "var(--ui-stroke-tertiary)") } }, item.stage || "draft"));
   let content;
-  if (view === "App settings") content = h3(Fragment, null, h3("section", { style: panel3 }, h3("h2", null, nativeBackend ? "Hermes backend connection" : "Service connection"), ...nativeBackend ? [h3("p", { key: "native" }, "Uses this Hermes connection and its profile-scoped backend. No service URL or bearer token is needed.")] : [input("Local service URL", base, setBase), input("Bearer token (stored locally; masked)", token, setToken)], button(connected ? "Reconnect" : "Connect", connect), button("Import legacy plugin data", importLegacy, !connected), h3("p", { role: "status" }, connected ? `Connected \xB7 revision ${workspace?.revision}` : nativeBackend ? "Disconnected. Enable the marketing backend on this Hermes connection, then retry." : "Disconnected. Configure the local service and token to load records."), h3("p", null, nativeBackend ? "Workspace and ledger are persisted on the connected Hermes host. Agents and renderer availability are separate capabilities." : "Token is excluded from export and sent only as the Authorization header to this configured service.")), h3("section", { style: panel3 }, h3("h2", null, `${selectedApp} app profile`), h3("p", null, "Service owned profile. Enter sourced brand, CTA, claim, rights, event, and privacy records as JSON; saving does not attest approval."), input(`${selectedApp} profile JSON`, profileText || JSON.stringify(workspace?.profiles?.find((p) => p.name === selectedApp) || { appId: selectedApp.toLowerCase(), name: selectedApp, brandPromise: "", claims: [], rights: "unknown", events: [], privacy: "unconfigured" }, null, 2), setProfileText, true), button("Save profile with revision check", async () => {
+  if (view === "Creatives") content = h4(CreativeGallery, { api, openDraft });
+  else if (view === "App settings") content = h4(Fragment, null, h4("section", { style: panel3 }, h4("h2", null, nativeBackend ? "Hermes backend connection" : "Service connection"), ...nativeBackend ? [h4("p", { key: "native" }, "Uses this Hermes connection and its profile-scoped backend. No service URL or bearer token is needed.")] : [input("Local service URL", base, setBase), input("Bearer token (stored locally; masked)", token, setToken)], button(connected ? "Reconnect" : "Connect", connect), button("Import legacy plugin data", importLegacy, !connected), h4("p", { role: "status" }, connected ? `Connected \xB7 revision ${workspace?.revision}` : nativeBackend ? "Disconnected. Enable the marketing backend on this Hermes connection, then retry." : "Disconnected. Configure the local service and token to load records."), h4("p", null, nativeBackend ? "Workspace and ledger are persisted on the connected Hermes host. Agents and renderer availability are separate capabilities." : "Token is excluded from export and sent only as the Authorization header to this configured service.")), h4("section", { style: panel3 }, h4("h2", null, `${selectedApp} app profile`), h4("p", null, "Service owned profile. Enter sourced brand, CTA, claim, rights, event, and privacy records as JSON; saving does not attest approval."), input(`${selectedApp} profile JSON`, profileText || JSON.stringify(workspace?.profiles?.find((p) => p.name === selectedApp) || { appId: selectedApp.toLowerCase(), name: selectedApp, brandPromise: "", claims: [], rights: "unknown", events: [], privacy: "unconfigured" }, null, 2), setProfileText, true), button("Save profile with revision check", async () => {
     try {
       const profile = JSON.parse(profileText);
       const out = await api(`/api/profiles/${encodeURIComponent(selectedApp)}`, { method: "PUT", body: JSON.stringify({ expectedRevision: workspace.revision, profile }) });
@@ -683,8 +809,8 @@ function MarketingPage({ ctx }) {
       setError(e.message);
     }
   }, !connected || !profileText)));
-  else if (view === "System health") content = h3(Fragment, null, h3(SystemHealth, { snapshot: health, metrics: health?.jobs ? { "Queued jobs": health.jobs.queued, "Running jobs": health.jobs.running, "Failed jobs": health.jobs.failed } : {}, onRetry: refreshHealth }), ...jobs.length ? jobs.map((item) => h3(JobDetail, { key: item.id, job: item, onRetry: (id) => item.status === "failed" && api(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }).then(refreshHealth).catch((e) => setError(e.message)) })) : [h3(JobDetail, { key: "empty", job: null })]);
-  else if (view === "Experiments") content = h3("section", { style: panel3 }, h3("h2", null, "Experiment recommendation"), input("Experiment policy and version (JSON)", experimentText, setExperimentText, true), input("Observations (JSON)", observationText, setObservationText, true), button("Recommend decision", async () => {
+  else if (view === "System health") content = h4(Fragment, null, h4(SystemHealth, { snapshot: health, metrics: health?.jobs ? { "Queued jobs": health.jobs.queued, "Running jobs": health.jobs.running, "Failed jobs": health.jobs.failed } : {}, onRetry: refreshHealth }), ...jobs.length ? jobs.map((item) => h4(JobDetail, { key: item.id, job: item, onRetry: (id) => item.status === "failed" && api(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: "POST" }).then(refreshHealth).catch((e) => setError(e.message)) })) : [h4(JobDetail, { key: "empty", job: null })]);
+  else if (view === "Experiments") content = h4("section", { style: panel3 }, h4("h2", null, "Experiment recommendation"), input("Experiment policy and version (JSON)", experimentText, setExperimentText, true), input("Observations (JSON)", observationText, setObservationText, true), button("Recommend decision", async () => {
     try {
       const out = await api("/api/experiments/recommend", { method: "POST", body: JSON.stringify({ draftId: draft?.id, revision: workspace?.revision, experiment: JSON.parse(experimentText), observations: JSON.parse(observationText) }) });
       setNotice(`Recommendation: ${out.decision?.status || out.status || "inconclusive"} \xB7 ${out.decision?.rationale || "No configured policy or sufficient evidence."}`);
@@ -692,47 +818,47 @@ function MarketingPage({ ctx }) {
     } catch (e) {
       setError(e.message);
     }
-  }, !connected), h3("p", null, "No decision is inferred without service-validated policy and observations."));
-  else if (view === "Slideshows" && draft) content = h3(
+  }, !connected), h4("p", null, "No decision is inferred without service-validated policy and observations."));
+  else if (view === "Slideshows" && draft) content = h4(
     Fragment,
     null,
-    h3(
+    h4(
       "section",
       { style: panel3 },
-      h3("header", null, h3("h2", null, draft.title || "Draft")),
+      h4("header", null, h4("h2", null, draft.title || "Draft")),
       input("Title", draft.title, (v) => edit(["title"], v)),
       input("Source evidence and pointers", draft.source?.evidence, (v) => edit(["source", "evidence"], v), true),
       input("Brief", draft.brief, (v) => edit(["brief"], v), true),
       input("Working hypothesis (unvalidated)", draft.hypothesis, (v) => edit(["hypothesis"], v), true),
-      h3("h3", null, "Structured slides"),
-      ...(draft.slides || []).map((slide, i) => h3("section", { key: i, style: panel3 }, input(`Slide ${i + 1} headline`, slide.headline, (v) => edit(["slides", String(i), "headline"], v)), input(`Slide ${i + 1} body`, slide.body, (v) => edit(["slides", String(i), "body"], v), true), button(`Choose native image for slide ${i + 1}`, () => chooseNativeImage(i)), h3("label", { style: labelStyle }, "Browser fallback image picker", h3("input", { type: "file", accept: "image/png,image/jpeg,image/webp", onChange: (e) => attachImage(i, e.target.files?.[0]) })), slide.selectedImage?.dataUrl ? h3("img", { alt: `Selected image for slide ${i + 1}`, src: slide.selectedImage.dataUrl, style: { maxWidth: 240, maxHeight: 240, objectFit: "contain" } }) : null, h3("div", null, `Image: ${slide.selectedImage?.contentRef ? "saved service asset" : slide.selectedImage?.dataUrl ? "selected image" : "not attached"} \xB7 rights status: ${slide.selectedImage?.rights || "unknown"}`))),
+      h4("h3", null, "Structured slides"),
+      ...(draft.slides || []).map((slide, i) => h4("section", { key: i, style: panel3 }, input(`Slide ${i + 1} headline`, slide.headline, (v) => edit(["slides", String(i), "headline"], v)), input(`Slide ${i + 1} body`, slide.body, (v) => edit(["slides", String(i), "body"], v), true), button(`Choose native image for slide ${i + 1}`, () => chooseNativeImage(i)), h4("label", { style: labelStyle }, "Browser fallback image picker", h4("input", { type: "file", accept: "image/png,image/jpeg,image/webp", onChange: (e) => attachImage(i, e.target.files?.[0]) })), slide.selectedImage?.dataUrl ? h4("img", { alt: `Selected image for slide ${i + 1}`, src: slide.selectedImage.dataUrl, style: { maxWidth: 240, maxHeight: 240, objectFit: "contain" } }) : null, h4("div", null, `Image: ${slide.selectedImage?.contentRef ? "saved service asset" : slide.selectedImage?.dataUrl ? "selected image" : "not attached"} \xB7 rights status: ${slide.selectedImage?.rights || "unknown"}`))),
       button("Add slide", () => edit(["slides"], [...draft.slides || [], { headline: "", body: "", selectedImage: null }]))
     ),
-    imageChoices && h3("section", { style: panel3, role: "dialog", "aria-label": "Choose an image" }, h3("h3", null, "Choose an image"), ...imageChoices.entries.map((entry) => button(entry.path || entry.name, () => selectNativeImage(entry))), button("Cancel image selection", () => setImageChoices(null))),
-    h3("section", { style: panel3 }, h3("h3", null, "Source evidence and compliance inputs"), ...["claim", "rights", "cta", "channels", "events", "privacy"].map((k) => input(`${k} \xB7 unapproved until reviewed`, draft.source?.[k] ?? draft[k] ?? "", (v) => edit(["source", k], v))), h3("div", null, "These are operator inputs, not approvals. Rights, privacy, claims, and distribution remain blocked until the service review has evidence."), h3("h3", null, "Quality review \xB7 exact 7 dimension rubric"), h3("p", null, "Enter review notes and evidence pointers. These are manual attestations and do not approve claims, rights, or distribution."), ...["audience fit", "hook clarity", "claim specificity/proof", "slide progression/payoff", "mobile legibility/visual coherence", "promise-to-destination match", "safety/rights/brand"].map((dimension) => {
+    imageChoices && h4("section", { style: panel3, role: "dialog", "aria-label": "Choose an image" }, h4("h3", null, "Choose an image"), ...imageChoices.entries.map((entry) => button(entry.path || entry.name, () => selectNativeImage(entry))), button("Cancel image selection", () => setImageChoices(null))),
+    h4("section", { style: panel3 }, h4("h3", null, "Source evidence and compliance inputs"), ...["claim", "rights", "cta", "channels", "events", "privacy"].map((k) => input(`${k} \xB7 unapproved until reviewed`, draft.source?.[k] ?? draft[k] ?? "", (v) => edit(["source", k], v))), h4("div", null, "These are operator inputs, not approvals. Rights, privacy, claims, and distribution remain blocked until the service review has evidence."), h4("h3", null, "Quality review \xB7 exact 7 dimension rubric"), h4("p", null, "Enter review notes and evidence pointers. These are manual attestations and do not approve claims, rights, or distribution."), ...["audience fit", "hook clarity", "claim specificity/proof", "slide progression/payoff", "mobile legibility/visual coherence", "promise-to-destination match", "safety/rights/brand"].map((dimension) => {
       const review = draft.qualityReviews?.find((item) => item.dimension === dimension) || {};
-      return h3("section", { key: dimension, style: { display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(100px, 2fr)", gap: 8 } }, h3("strong", null, dimension), input(`${dimension} score (0\u20135; blank = unassessed)`, review.score ?? "", (value) => setQualityReview(dimension, "score", value === "" ? null : Number(value))), h3("label", { style: labelStyle }, `${dimension} review type`, h3("select", { "aria-label": `${dimension} review type`, value: review.reviewer?.type || "human", onChange: (e) => setQualityReview(dimension, "reviewer", { type: e.target.value, name: review.reviewer?.name || "" }), style: fieldStyle }, h3("option", { value: "human" }, "Human attestation"), h3("option", { value: "automated" }, "Automated review"))), input(`${dimension} reviewer name`, review.reviewer?.name || "", (value) => setQualityReview(dimension, "reviewer", { type: review.reviewer?.type || "human", name: value })), input(`${dimension} rationale`, review.rationale || "", (value) => setQualityReview(dimension, "rationale", value)), input(`${dimension} evidence refs (comma separated)`, (review.evidenceRefs || []).join(", "), (value) => setQualityReview(dimension, "evidenceRefs", value.split(",").map((ref) => ref.trim()).filter(Boolean))), input(`${dimension} reviewed at (ISO 8601)`, review.reviewedAt || "", (value) => setQualityReview(dimension, "reviewedAt", value)));
-    }), button("Run service review", runReview, !connected || dirty), h3("div", null, `Review status: ${draft.review?.status || draft.review || "not assessed"}`)),
-    h3("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, button(dirty ? "Save to service" : `Saved \xB7 revision ${workspace?.revision ?? "\u2014"}`, saveDraft, !connected || !dirty), button("Render saved revision", render, !connected || dirty || !draft.id), button("Export rendered ZIP", exportZip, !rendered || !job)),
+      return h4("section", { key: dimension, style: { display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(100px, 2fr)", gap: 8 } }, h4("strong", null, dimension), input(`${dimension} score (0\u20135; blank = unassessed)`, review.score ?? "", (value) => setQualityReview(dimension, "score", value === "" ? null : Number(value))), h4("label", { style: labelStyle }, `${dimension} review type`, h4("select", { "aria-label": `${dimension} review type`, value: review.reviewer?.type || "human", onChange: (e) => setQualityReview(dimension, "reviewer", { type: e.target.value, name: review.reviewer?.name || "" }), style: fieldStyle }, h4("option", { value: "human" }, "Human attestation"), h4("option", { value: "automated" }, "Automated review"))), input(`${dimension} reviewer name`, review.reviewer?.name || "", (value) => setQualityReview(dimension, "reviewer", { type: review.reviewer?.type || "human", name: value })), input(`${dimension} rationale`, review.rationale || "", (value) => setQualityReview(dimension, "rationale", value)), input(`${dimension} evidence refs (comma separated)`, (review.evidenceRefs || []).join(", "), (value) => setQualityReview(dimension, "evidenceRefs", value.split(",").map((ref) => ref.trim()).filter(Boolean))), input(`${dimension} reviewed at (ISO 8601)`, review.reviewedAt || "", (value) => setQualityReview(dimension, "reviewedAt", value)));
+    }), button("Run service review", runReview, !connected || dirty), h4("div", null, `Review status: ${draft.review?.status || draft.review || "not assessed"}`)),
+    h4("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, button(dirty ? "Save to service" : `Saved \xB7 revision ${workspace?.revision ?? "\u2014"}`, saveDraft, !connected || !dirty), button("Render saved revision", render, !connected || dirty || !draft.id), button("Export rendered ZIP", exportZip, !rendered || !job)),
     renderPanel
   );
-  else if (view === "Slideshows") content = h3(EmptyState, { title: "No draft selected", description: "Open a service draft or create one." }, button("New draft", createDraft, !connected));
-  else if (view === "Overview") content = h3(
+  else if (view === "Slideshows") content = h4(EmptyState, { title: "No draft selected", description: "Open a service draft or create one." }, button("New draft", createDraft, !connected));
+  else if (view === "Overview") content = h4(
     "section",
     { style: { display: "grid", gap: 16 } },
-    h3(
+    h4(
       "header",
       { style: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 12 } },
-      h3(
+      h4(
         "div",
         null,
-        h3("h2", { style: { margin: "0 0 4px", fontSize: "clamp(1.25rem, 3vw, 1.5rem)" } }, `Marketing overview \xB7 ${selectedApp}`),
-        h3("p", { style: { margin: 0, color: "var(--ui-text-tertiary)", fontSize: "0.85rem" } }, connected ? `Service revision ${workspace?.revision} \xB7 ${records.length} saved draft${records.length !== 1 ? "s" : ""}` : "Service disconnected \xB7 metrics and records unavailable")
+        h4("h2", { style: { margin: "0 0 4px", fontSize: "clamp(1.25rem, 3vw, 1.5rem)" } }, `Marketing overview \xB7 ${selectedApp}`),
+        h4("p", { style: { margin: 0, color: "var(--ui-text-tertiary)", fontSize: "0.85rem" } }, connected ? `Service revision ${workspace?.revision} \xB7 ${records.length} saved draft${records.length !== 1 ? "s" : ""}` : "Service disconnected \xB7 metrics and records unavailable")
       ),
-      h3(
+      h4(
         "div",
         { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" } },
-        h3("label", { style: labelStyle }, "App", h3("select", { "aria-label": "App", value: selectedApp, onChange: (e) => {
+        h4("label", { style: labelStyle }, "App", h4("select", { "aria-label": "App", value: selectedApp, onChange: (e) => {
           const app = e.target.value;
           setSelectedApp(app);
           setDraft(null);
@@ -747,34 +873,34 @@ function MarketingPage({ ctx }) {
           }).catch((error2) => {
             if (req === generation.current) setError(error2.message);
           });
-        }, style: { ...fieldStyle, minWidth: 180 } }, ...Array.from(/* @__PURE__ */ new Set(["Cherry", ...(workspace?.profiles || []).map((p) => p.name || p.appId).filter(Boolean)])).map((app) => h3("option", { key: app, value: app }, app)))),
+        }, style: { ...fieldStyle, minWidth: 180 } }, ...Array.from(/* @__PURE__ */ new Set(["Cherry", ...(workspace?.profiles || []).map((p) => p.name || p.appId).filter(Boolean)])).map((app) => h4("option", { key: app, value: app }, app)))),
         button("New draft", createDraft, !connected)
       )
     ),
-    h3("section", { style: panel3 }, button("Generate and critique 5 Cherry slideshows", runAgent, !connected), h3("p", null, "Runs locally through the connected agent service. Results are unapproved; this action does not schedule or publish content."), agentRuns.length > 0 && h3("div", { "aria-label": "Saved agent runs" }, h3("strong", null, `${agentRuns.length} saved agent run${agentRuns.length === 1 ? "" : "s"}`), ...agentRuns.map((run) => button(`Open run ${run.runId} \xB7 ${run.status}`, () => openAgentRun(run.runId)))), agentRun && h3("div", null, h3("p", { role: "status", "aria-live": "polite" }, `Agent run ${agentRun.runId || ""}: ${agentRun.status}${agentRun.stage ? ` \xB7 ${agentRun.stage}` : ""}${agentRun.completedCount != null ? ` \xB7 ${agentRun.completedCount} completed` : ""}`), !["succeeded", "failed", "cancelled", "interrupted"].includes(agentRun.status) && button("Refresh agent run status", refreshAgentRun))),
-    h3(SyntheticDemoBanner),
-    h3(
+    h4("section", { style: panel3 }, button("Generate and critique 5 Cherry slideshows", runAgent, !connected), h4("p", null, "Runs locally through the connected agent service. Results are unapproved; this action does not schedule or publish content."), agentRuns.length > 0 && h4("div", { "aria-label": "Saved agent runs" }, h4("strong", null, `${agentRuns.length} saved agent run${agentRuns.length === 1 ? "" : "s"}`), ...agentRuns.map((run) => button(`Open run ${run.runId} \xB7 ${run.status}`, () => openAgentRun(run.runId)))), agentRun && h4("div", null, h4("p", { role: "status", "aria-live": "polite" }, `Agent run ${agentRun.runId || ""}: ${agentRun.status}${agentRun.stage ? ` \xB7 ${agentRun.stage}` : ""}${agentRun.completedCount != null ? ` \xB7 ${agentRun.completedCount} completed` : ""}`), !["succeeded", "failed", "cancelled", "interrupted"].includes(agentRun.status) && button("Refresh agent run status", refreshAgentRun))),
+    h4(SyntheticDemoBanner),
+    h4(
       "section",
       {
         style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 },
         "aria-label": "Key metrics"
       },
-      h3(MetricCard, { label: "Qualified activations", value: workspace?.observations?.length ? workspace.observations.filter((o) => o.metricKind === "activation").length : "\u2014", status: workspace?.observations?.length ? "available" : "unavailable" }),
-      h3(MetricCard, { label: "Paid conversions", value: workspace?.observations?.length ? workspace.observations.filter((o) => o.metricKind === "conversion").length : "\u2014", status: workspace?.observations?.length ? "available" : "unavailable" }),
-      h3(MetricCard, { label: "Attributable revenue", value: workspace?.observations?.length ? "$" + workspace.observations.filter((o) => o.metricKind === "revenue").reduce((sum, o) => sum + (o.value || 0), 0).toFixed(2) : "\u2014", status: workspace?.observations?.length ? "available" : "unavailable" })
+      h4(MetricCard, { label: "Qualified activations", value: workspace?.observations?.length ? workspace.observations.filter((o) => o.metricKind === "activation").length : "\u2014", status: workspace?.observations?.length ? "available" : "unavailable" }),
+      h4(MetricCard, { label: "Paid conversions", value: workspace?.observations?.length ? workspace.observations.filter((o) => o.metricKind === "conversion").length : "\u2014", status: workspace?.observations?.length ? "available" : "unavailable" }),
+      h4(MetricCard, { label: "Attributable revenue", value: workspace?.observations?.length ? "$" + workspace.observations.filter((o) => o.metricKind === "revenue").reduce((sum, o) => sum + (o.value || 0), 0).toFixed(2) : "\u2014", status: workspace?.observations?.length ? "available" : "unavailable" })
     ),
-    h3(
+    h4(
       "section",
       { style: { ...panel3, display: "grid", gap: 10 } },
-      h3(
+      h4(
         "header",
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 } },
-        h3("h3", { style: { margin: 0, fontSize: "1rem" } }, "Saved drafts"),
-        records.length > 0 ? h3("span", { style: { fontSize: "0.75rem", color: "var(--ui-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em" } }, `${records.length} draft${records.length !== 1 ? "s" : ""}`) : null
+        h4("h3", { style: { margin: 0, fontSize: "1rem" } }, "Saved drafts"),
+        records.length > 0 ? h4("span", { style: { fontSize: "0.75rem", color: "var(--ui-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em" } }, `${records.length} draft${records.length !== 1 ? "s" : ""}`) : null
       ),
-      records.length > 0 ? h3("div", { style: { display: "grid", gap: 8 } }, ...records.map((item) => h3(DraftListItem, { item, onClick: () => openDraft(item) }))) : h3("div", { style: { textAlign: "center", padding: "24px 12px", color: "var(--ui-text-tertiary)" } }, h3("p", { style: { margin: "0 0 8px" } }, "No drafts saved yet. Create your first draft or explore the synthetic demo above."), h3("p", { style: { margin: 0, fontSize: "0.85rem" } }, "Drafts are stored in the service workspace and survive reload."))
+      records.length > 0 ? h4("div", { style: { display: "grid", gap: 8 } }, ...records.map((item) => h4(DraftListItem, { item, onClick: () => openDraft(item) }))) : h4("div", { style: { textAlign: "center", padding: "24px 12px", color: "var(--ui-text-tertiary)" } }, h4("p", { style: { margin: "0 0 8px" } }, "No drafts saved yet. Create your first draft or explore the synthetic demo above."), h4("p", { style: { margin: 0, fontSize: "0.85rem" } }, "Drafts are stored in the service workspace and survive reload."))
     ),
-    h3("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, button("Sync Postiz (read only)", async () => {
+    h4("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, button("Sync Postiz (read only)", async () => {
       try {
         const result = await api("/api/postiz/sync", { method: "POST", body: JSON.stringify({ app: selectedApp, window: { start: new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10), end: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10) }, days: 30 }) });
         setNotice(result.status === "blocked" && result.error?.code === "channel_unconfigured" ? `Postiz is reachable. Configure ${result.integrations?.length || 0} integration(s) in this app's approved profile.` : `Postiz sync: ${result.status}${result.platformAnalyticsStatus ? ` \xB7 channel analytics ${result.platformAnalyticsStatus}` : ""}${result.posts?.length != null ? ` \xB7 ${result.posts.length} matched posts` : ""}`);
@@ -784,7 +910,7 @@ function MarketingPage({ ctx }) {
       }
     }, !connected))
   );
-  else content = h3("section", { style: panel3 }, h3("h2", null, "Outcome import"), h3("p", null, "Import owner approved aggregate rows only. Raw event data and provider credentials are not accepted."), input("Aggregate outcomes JSON", metricsText, setMetricsText, true), button("Import outcomes", async () => {
+  else content = h4("section", { style: panel3 }, h4("h2", null, "Outcome import"), h4("p", null, "Import owner approved aggregate rows only. Raw event data and provider credentials are not accepted."), input("Aggregate outcomes JSON", metricsText, setMetricsText, true), button("Import outcomes", async () => {
     try {
       const rows = JSON.parse(metricsText);
       const result = await api("/api/outcomes/import", { method: "POST", body: JSON.stringify({ app: selectedApp, rows, eventDefinitions: workspace?.profile?.events || [], attributionPolicy: workspace?.profile?.attributionPolicy || null, source: "operator-import", window: null }) });
@@ -793,8 +919,8 @@ function MarketingPage({ ctx }) {
     } catch (e) {
       setError(e.message);
     }
-  }, !connected), h3("h3", null, "Imported observations"), ...(workspace?.observations || []).map((row, i) => h3("pre", { key: i, style: { whiteSpace: "pre-wrap" } }, JSON.stringify(row))), h3("p", null, workspace?.observations?.length ? "Values below are service returned observations." : "No observations returned by service. Outcome is unavailable, not zero."));
-  return h3("main", { style: { padding: "20px", color: "var(--ui-text-primary)" } }, h3("div", { style: { maxWidth: 1120, width: "100%", margin: "auto", display: "grid", gap: 14 } }, h3("header", null, h3("div", { style: { color: "var(--ui-text-tertiary)", fontSize: 12 } }, "APP MARKETING \xB7 SERVICE WORKSPACE"), h3("h1", null, draft && view === "Slideshows" ? draft.title : "Marketing workflow")), h3("nav", { style: { display: "flex", flexWrap: "wrap", gap: 6 } }, ...nav.map((name) => h3(Button, { key: name, variant: name === view ? "secondary" : "ghost", onClick: () => {
+  }, !connected), h4("h3", null, "Imported observations"), ...(workspace?.observations || []).map((row, i) => h4("pre", { key: i, style: { whiteSpace: "pre-wrap" } }, JSON.stringify(row))), h4("p", null, workspace?.observations?.length ? "Values below are service returned observations." : "No observations returned by service. Outcome is unavailable, not zero."));
+  return h4("main", { style: { padding: "20px", color: "var(--ui-text-primary)" } }, h4("div", { style: { maxWidth: 1120, width: "100%", margin: "auto", display: "grid", gap: 14 } }, h4("header", null, h4("div", { style: { color: "var(--ui-text-tertiary)", fontSize: 12 } }, "APP MARKETING \xB7 SERVICE WORKSPACE"), h4("h1", null, draft && view === "Slideshows" ? draft.title : "Marketing workflow")), h4("nav", { style: { display: "flex", flexWrap: "wrap", gap: 6 } }, ...nav.map((name) => h4(Button, { key: name, variant: name === view ? "secondary" : "ghost", onClick: () => {
     if (dirty && typeof globalThis.confirm === "function" && !globalThis.confirm("Discard unsaved draft changes?")) return;
     if (dirty) {
       setDraft(null);
@@ -802,7 +928,7 @@ function MarketingPage({ ctx }) {
       setRendered(null);
     }
     setView(name);
-  } }, name))), error ? h3("div", { role: "alert" }, error) : null, notice ? h3("div", { role: "status", "aria-live": "polite" }, notice) : null, content));
+  } }, name))), error ? h4("div", { role: "alert" }, error) : null, notice ? h4("div", { role: "status", "aria-live": "polite" }, notice) : null, content));
 }
 var entry_default = { id: "marketing-system", name: "App Marketing", description: "Service-backed marketing workflow", register(ctx) {
   ctx.register({ id: "page", area: ROUTES_AREA, data: { path: ROUTE }, render: () => jsx(MarketingPage, { ctx }) });

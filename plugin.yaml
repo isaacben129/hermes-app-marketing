@@ -1,5 +1,5 @@
 name: marketing-system
-version: 1.1.0
+version: 1.2.0
 description: App-agnostic service-backed Hermes Desktop marketing workflow with Cherry configured first.
 license: MIT
 tags: [marketing, desktop, slideshow, service-backed]

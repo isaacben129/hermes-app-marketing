@@ -54,3 +54,6 @@ Verify the exact installed Desktop copy, enable/reload it in the actual app, ope
 - Loading Postiz configuration now uses the same protected-file convention in both launch paths. Configuration presence is not connectivity. Keep a failing upstream marked blocked until a real provider read succeeds; local authoring/render/export do not require Postiz.
 
 The native Desktop update must include **both** this backend package and the matching built Desktop module, followed by the host's normal reload. Tests of the real Python/Node path and SDK harness are not proof that a user's Windows host has loaded those files.
+# Generated creative gallery
+
+The native desktop plugin includes a read-only **Creatives** view for Cherry. It lists saved, rendered candidates from the connected profile, opens the actual saved PNG slides, and shows recorded critique scores and blockers. Candidates remain explicitly unapproved. Missing or unreadable artifacts are omitted; the gallery does not regenerate or publish content.

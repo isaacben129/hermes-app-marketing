@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path: sys.path.insert(0, str(ROOT))
 from dashboard.agent_runs import get_run, list_runs, start_run
+from dashboard.creative_previews import creatives_endpoint, read_slide
 
 router = APIRouter()
 MAX_BODY_BYTES = 64_000_000
@@ -120,6 +121,16 @@ async def read_agent_run(run_id: str):
     record = get_run(directory, run_id)
     if record is None: return JSONResponse({"error": {"code": "invalid_input", "message": "Run not found."}}, status_code=404)
     return record
+
+
+@router.get("/creative-previews")
+async def read_creative_previews(app: str = "Cherry"):
+    return await creatives_endpoint(app)
+
+
+@router.get("/creative-previews/{run_id}/{package_id}/slides/{slide_index}")
+async def read_creative_slide(run_id: str, package_id: str, slide_index: int):
+    return read_slide(run_id, package_id, slide_index)
 
 
 @router.api_route("/{path:path}", methods=["GET", "PUT", "POST", "DELETE"])
