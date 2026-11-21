@@ -48,6 +48,29 @@ class PluginBackendTest(unittest.TestCase):
             self.assertTrue(list(Path(home).rglob('*.jsonl')), 'no durable ledger written under Hermes home')
 
 
+    def test_unified_backend_renders_and_exports_saved_image_without_renderer_daemon(self):
+        import base64, hashlib, io, json, zipfile
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HERMES_HOME': home, 'NODE_OPTIONS': '--import=' + (ROOT / 'tests/helpers/deny-renderer-network.mjs').as_uri()}):
+            client = self.load_client()
+            root = '/api/plugins/marketing-system'
+            buffer = io.BytesIO(); Image.new('RGB', (40, 60), '#9fbbc5').save(buffer, 'PNG')
+            raw = buffer.getvalue(); digest = hashlib.sha256(raw).hexdigest()
+            draft = {'id': 'local-render-proof', 'app': 'Cherry', 'title': 'Unapproved render check', 'slides': [{'headline': 'One small step', 'body': 'Local test image, not campaign approval.', 'selectedImage': {'dataUrl': 'data:image/png;base64,' + base64.b64encode(raw).decode(), 'sha256': digest, 'sourceRef': 'synthetic:local-render-test'}}]}
+            before = client.get(root + '/workspace?app=Cherry').json()
+            saved = client.put(root + '/drafts/local-render-proof', json={'draft': draft, 'expectedRevision': before['revision']})
+            self.assertEqual(saved.status_code, 200, saved.text)
+            rendered = client.post(root + '/render', json={'jobId': 'local-render-job', 'draftId': draft['id'], 'revision': saved.json()['revision']})
+            self.assertEqual(rendered.status_code, 202, rendered.text)
+            image = Image.open(io.BytesIO(base64.b64decode(rendered.json()['rendered']['slides'][0]['pngBase64'])))
+            self.assertEqual(image.size, (1080, 1920))
+            exported = client.post(root + '/export', json={'draftId': draft['id'], 'revision': saved.json()['revision'], 'renderJobId': 'local-render-job'})
+            self.assertEqual(exported.status_code, 200, exported.text)
+            with zipfile.ZipFile(io.BytesIO(base64.b64decode(exported.json()['zipBase64']))) as archive:
+                manifest = json.loads(archive.read('manifest.json'))
+                self.assertEqual(manifest['files'], ['slide-01.png'])
+                self.assertEqual(manifest['slides'][0]['image_sha256'], digest)
+
     def test_runtime_failure_is_diagnosable_without_leaking_child_output(self):
         import subprocess
         with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HERMES_HOME': home}):

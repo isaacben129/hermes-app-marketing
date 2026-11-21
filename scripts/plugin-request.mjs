@@ -8,7 +8,7 @@ import { createActions } from '../src/service/actions.mjs'
 import { EventLedger } from '../src/storage/ledger.mjs'
 import { WorkspaceStore } from '../src/storage/workspace.mjs'
 import { LocalJobRunner } from '../src/jobs/runner.mjs'
-import { RendererClient } from '../src/service/renderer-client.mjs'
+import { LocalRendererClient } from '../src/service/local-renderer-client.mjs'
 import { RenderArtifacts } from '../src/service/artifacts.mjs'
 import { createDefaultPostizReader } from '../src/integrations/postiz.mjs'
 import { applySecrets } from '../src/ops/load-secrets.mjs'
@@ -24,7 +24,7 @@ const ledger = new EventLedger({ baseDir: path.join(dataDir, 'ledger') })
 const workspace = new WorkspaceStore({ ledger })
 const runner = new LocalJobRunner({ ledger })
 await runner.restore()
-const renderer = new RendererClient({ origin: 'http://127.0.0.1:8765', timeoutMs: 1000 })
+const renderer = new LocalRendererClient({ dataDir })
 const artifacts = new RenderArtifacts({ dataDir })
 let postizReader = null
 try { postizReader = createDefaultPostizReader() } catch { /* report unavailable, not fabricated data */ }

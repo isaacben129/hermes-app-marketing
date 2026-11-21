@@ -12,6 +12,30 @@ SPEC.loader.exec_module(batch)
 
 
 class CherryBatchRunnerTest(unittest.TestCase):
+    def test_five_package_completion_matches_ui_succeeded_contract(self):
+        from tests.test_agent_runs import prepared_context
+        import copy
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp); prepared_context(directory)
+            run_id = 'b' * 32
+            folder = directory / 'agent-runs' / run_id; folder.mkdir(parents=True)
+            (folder / 'run.json').write_text(json.dumps({'runId': run_id, 'status': 'running', 'completedCount': 0}))
+            calls = []
+            def model_fixture(executable, prompt, schema, output_file, cwd, **kwargs):
+                calls.append(schema)
+                if schema == 'cherry-run.schema.json':
+                    value = {'title': 'Explicit test fixture', 'slides': [{'headline': 'Fixture', 'body': 'Fixture only', 'textPosition': 'top', 'assetId': 'asset-fixture'} for _ in range(5)], 'assetIds': ['asset-fixture'], 'sourceRefs': ['source-fixture'], 'claimNotes': []}
+                else:
+                    value = {'reviews': [{'dimension': d, 'score': 3, 'rationale': 'Fixture judgment, not live critique', 'evidenceRefs': ['rendered/slide-01.png']} for d in batch.DIMENSIONS], 'hardBlockers': [], 'lessons': ['fixture lesson']}
+                return copy.deepcopy(value), {'threadId': f'fixture-{len(calls)}', 'model': batch.MODEL}
+            with patch.object(batch.shutil, 'which', return_value='/fixture/codex'), patch.object(batch, '_codex', side_effect=model_fixture), patch.object(batch, '_render', return_value=[{'file': 'rendered/slide-01.png', 'sha256': '0'*64}]), patch.object(batch, '_persist_draft', side_effect=lambda data_dir, rid, i, *rest: {'draftId': f'{rid}-{i:02d}', 'revision': i}):
+                batch.run(directory, run_id)
+            record = json.loads((folder / 'run.json').read_text())
+            self.assertEqual(record['status'], 'succeeded')
+            self.assertEqual(record['completedCount'], 5)
+            self.assertEqual(len(record['results']), 5)
+            self.assertEqual(len(calls), 20)
+
     def test_codex_execution_uses_fixed_model_readonly_ephemeral_cli_and_records_real_session_id(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'message.json'

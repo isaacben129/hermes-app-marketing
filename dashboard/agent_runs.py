@@ -52,12 +52,15 @@ def _context_ready(directory: Path):
     if any(key not in context for key in required): return False
     if not isinstance(context['brandSource'], dict) or not isinstance(context['CTA'], dict): return False
     if context['rubric'] != RUBRIC: return False
-    if not isinstance(context['sources'], list) or not context['sources'] or not isinstance(context['assetManifest'], list) or not 1 <= len(context['assetManifest']) <= 20: return False
-    if any(not isinstance(source, dict) or not all(isinstance(source.get(key), str) and source[key].strip() for key in ('id', 'url', 'purpose', 'notes')) or source.get('purpose') != 'structural inspiration only' for source in context['sources']): return False
+    if not isinstance(context['sources'], list) or not context['sources'] or not isinstance(context['assetManifest'], list) or not 1 <= len(context['assetManifest']) <= 50: return False
+    if any(not isinstance(source, dict) or not all(isinstance(source.get(key), str) and source[key].strip() for key in ('id', 'url', 'purpose', 'notes')) for source in context['sources']): return False
     cta = context['CTA']
     if not all(isinstance(cta.get(key), str) and cta[key].strip() for key in ('text', 'destination', 'status')): return False
     brand = context['brandSource']
-    if any(not isinstance(brand.get(key), str) or not brand[key].strip() for key in ('locator', 'version', 'promise', 'tone', 'avoidClaims')): return False
+    if any(not isinstance(brand.get(key), str) or not brand[key].strip() for key in ('locator', 'version', 'promise')): return False
+    for key in ('tone', 'avoidClaims'):
+        value = brand.get(key)
+        if not ((isinstance(value, str) and value.strip()) or (isinstance(value, list) and value and all(isinstance(item, str) and item.strip() for item in value))): return False
     directions = context['directions']
     if not isinstance(directions, list) or len(directions) != 5: return False
     if any(not isinstance(item, dict) or not any(isinstance(item.get(key), str) and item[key].strip() for key in ('name', 'title', 'scenario')) or not any(isinstance(item.get(key), str) and item[key].strip() for key in ('brief', 'scenarioBrief', 'description')) for item in directions): return False

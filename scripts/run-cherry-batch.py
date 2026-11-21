@@ -213,7 +213,7 @@ def run(data_dir: Path, run_id: str):
         lessons.extend(critique.get('lessons', []))
         lessons.extend(final_critique.get('lessons', []))
         record.update(stage=f'package-{index}-complete', completedCount=index, results=results, updatedAt=now()); _write(run_file, record)
-    record.update(status='completed', stage='completed', completedCount=5, results=results, updatedAt=now()); _write(run_file, record)
+    record.update(status='succeeded', stage='completed', completedCount=5, results=results, updatedAt=now()); _write(run_file, record)
 
 
 def main():

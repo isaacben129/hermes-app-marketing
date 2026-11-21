@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from dashboard.agent_runs import get_run, list_runs, start_run
+from dashboard.agent_runs import get_run, list_runs, start_run, _context_ready
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -27,6 +27,19 @@ def prepared_context(directory):
 
 
 class AgentRunsTest(unittest.TestCase):
+    def test_prepared_context_accepts_product_sources_list_brand_fields_and_25_assets(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            prepared_context(directory)
+            file = directory / 'agent-context' / 'context.json'
+            context = json.loads(file.read_text())
+            context['brandSource']['tone'] = ['calm', 'plain language']
+            context['brandSource']['avoidClaims'] = ['cure', 'guaranteed result']
+            context['sources'].append({'id': 'product', 'url': 'git:verified-product', 'purpose': 'product positioning source, not clinical evidence', 'notes': 'Verified product facts remain separate from third-party structure.'})
+            context['assetManifest'] = [{**context['assetManifest'][0], 'id': f'asset-{i}'} for i in range(25)]
+            file.write_text(json.dumps(context))
+            self.assertTrue(_context_ready(directory), 'the documented parent-prepared context schema must be usable')
+
     def test_start_persists_server_id_launches_only_fixed_runner_and_enforces_one_active_batch(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
