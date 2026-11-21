@@ -9,6 +9,17 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def route_matches(route, method, route_path):
+    """Use Starlette's own matcher while excluding the Node forwarding route."""
+    from starlette.routing import Match
+    endpoint = getattr(route, 'endpoint', None)
+    if endpoint is None or endpoint.__name__ == 'application_request':
+        return False
+    if method not in getattr(route, 'methods', set()):
+        return False
+    return route.matches({'type': 'http', 'method': method, 'path': route_path, 'root_path': '', 'headers': [], 'query_string': b'', 'scheme': 'http', 'server': ('testserver', 80), 'client': ('testclient', 50000)})[0] is Match.FULL
+
+
 def main():
     raw = os.environ.get('HERMES_DASHBOARD_REQUEST', '')
     if len(raw) > 64_000:
@@ -38,16 +49,7 @@ def main():
     # The package router has a generic Node catchall. Only dispatch if a direct
     # route exists, so a missing gallery route cannot recurse into Node.
     route_path = parsed.path.removeprefix('/api')
-    direct = any(
-        method in getattr(route, 'methods', set())
-        and getattr(route, 'endpoint', None).__name__ != 'application_request'
-        and (getattr(route, 'path', None) == route_path
-             or (getattr(route, 'path', None) == '/agent-runs/{run_id}'
-                 and re.fullmatch(r'/agent-runs/[a-f0-9]{32}', route_path))
-             or (getattr(route, 'path', None) == '/creative-previews/{run_id}/{package_id}/slides/{index}'
-                 and slide_path))
-        for route in plugin_api.router.routes
-    )
+    direct = any(route_matches(route, method, route_path) for route in plugin_api.router.routes)
     if not direct:
         print(json.dumps({'status': 404, 'body': {'detail': 'Not Found'}}))
         return
