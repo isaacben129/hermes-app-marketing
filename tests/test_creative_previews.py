@@ -26,6 +26,24 @@ class CreativePreviewTests(unittest.TestCase):
         self.assertEqual(hashlib.sha256(data).hexdigest(),image['sha256'])
         with Image.open(io.BytesIO(data)) as decoded: self.assertEqual(decoded.size,(24,36))
 
+    def test_skips_non_object_run_records_without_hiding_valid_runs(self):
+        malformed=self.data/'agent-runs'/('b'*32); malformed.mkdir()
+        (malformed/'run.json').write_text('[]')
+        self.assertEqual(len(cp.list_creatives(self.data)['creatives']),1)
+        (malformed/'run.json').write_text(json.dumps([]))
+        self.assertEqual(len(cp.list_creatives(self.data)['creatives']),1)
+
+    def test_rejects_jpeg_with_png_name_even_with_matching_provenance_digest(self):
+        path=self.art/'rendered'/'slide-01.png'; buffer=io.BytesIO(); Image.new('RGB',(24,36)).save(buffer,'JPEG'); data=buffer.getvalue(); path.write_bytes(data)
+        provenance=self.art/'provenance.json'; body=json.loads(provenance.read_text()); body['rendered'][0]['sha256']=hashlib.sha256(data).hexdigest(); provenance.write_text(json.dumps(body))
+        self.assertEqual(cp.list_creatives(self.data)['creatives'],[])
+        self.assertEqual(cp.read_slide(self.data,self.run,self.pkg,0).status_code,404)
+
+    def test_rejects_png_dimensions_outside_bounds(self):
+        path=self.art/'rendered'/'slide-01.png'; buffer=io.BytesIO(); Image.new('RGB',(4097,1)).save(buffer,'PNG'); data=buffer.getvalue(); path.write_bytes(data)
+        provenance=self.art/'provenance.json'; body=json.loads(provenance.read_text()); body['rendered'][0]['sha256']=hashlib.sha256(data).hexdigest(); provenance.write_text(json.dumps(body))
+        self.assertEqual(cp.list_creatives(self.data)['creatives'],[])
+
     def test_tampered_digest_missing_png_and_malformed_provenance_are_unavailable(self):
         provenance=self.art/'provenance.json'; body=json.loads(provenance.read_text()); body['rendered'][0]['sha256']='0'*64; provenance.write_text(json.dumps(body))
         self.assertEqual(cp.list_creatives(self.data)['creatives'],[])

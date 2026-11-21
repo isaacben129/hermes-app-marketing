@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import re
+import warnings
 from pathlib import Path, PurePosixPath
 
 from fastapi.responses import JSONResponse
@@ -34,7 +35,12 @@ def _image(path, artifact, expected):
     if not path.is_file() or path.stat().st_size > MAX_PNG: raise ValueError("invalid image size")
     data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != expected: raise ValueError("image digest mismatch")
-    with Image.open(path) as image: image.verify()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", Image.DecompressionBombWarning)
+        with Image.open(path) as image:
+            if image.format != "PNG" or not (1 <= image.width <= 4096 and 1 <= image.height <= 4096):
+                raise ValueError("invalid PNG dimensions or format")
+            image.verify()
     return data
 
 def _creative(directory, run_id, result, verify_images=True):
@@ -82,7 +88,7 @@ def list_creatives(directory, app="Cherry"):
             if not RUN_RE.fullmatch(run_root.name): continue
             _safe_path(run_root, root)
             record = _json(run_root / "run.json")
-            if record.get("runId") != run_root.name or record.get("app") != "Cherry" or not isinstance(record.get("results"), list): continue
+            if not isinstance(record, dict) or record.get("runId") != run_root.name or record.get("app") != "Cherry" or not isinstance(record.get("results"), list): continue
             for result in record["results"][:MAX_ITEMS]:
                 if not isinstance(result, dict): continue
                 try:
@@ -103,7 +109,7 @@ def read_slide(directory, run_id, package_id, slide_index):
     try:
         run_root = _safe_path(Path(directory) / "agent-runs" / run_id, Path(directory) / "agent-runs")
         record = _json(run_root / "run.json")
-        if record.get("runId") != run_id or record.get("app") != "Cherry": raise ValueError("invalid run")
+        if not isinstance(record, dict) or record.get("runId") != run_id or record.get("app") != "Cherry" or not isinstance(record.get("results"), list): raise ValueError("invalid run")
         result = next(r for r in record["results"] if isinstance(r, dict) and r.get("packageId") == package_id)
         creative = _creative(directory, run_id, result, verify_images=False)
         metadata = creative["slides"][slide_index]

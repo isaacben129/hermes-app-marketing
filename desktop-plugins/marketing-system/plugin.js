@@ -188,6 +188,10 @@ function JobDetail({ job = null, onRetry, onPause, onResume }) {
 // src/ui/CreativeGallery.js
 import React3, { useEffect, useState } from "react";
 var h3 = React3.createElement;
+var iterationLabel = (value) => {
+  const match = typeof value === "string" && /^iteration-([0-9]+)$/.exec(value);
+  return match ? `Revision ${match[1]}` : "Original";
+};
 function CreativeCover({ api, item }) {
   const [src, setSrc] = useState("");
   const [failed, setFailed] = useState(false);
@@ -273,7 +277,7 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
         h3(CreativeCover, { api, item }),
         h3("strong", null, item.title),
         h3("span", null, `Unapproved \xB7 ${item.status}`),
-        h3("span", null, `${item.slideCount} rendered slides \xB7 ${item.iteration}`)
+        h3("span", null, `${item.slideCount} rendered slides \xB7 ${iterationLabel(item.iteration)}`)
       ))
     )
   );
@@ -288,7 +292,7 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
       "article",
       { style: panel4 },
       h3("h3", null, selected.title),
-      h3("span", { role: "status" }, `Unapproved \xB7 ${selected.status} \xB7 ${selected.iteration}`),
+      h3("span", { role: "status" }, `Unapproved \xB7 ${selected.status} \xB7 ${iterationLabel(selected.iteration)}`),
       image ? h3("img", { alt: `${selected.title}, slide ${slide + 1}`, src: image, style: { maxHeight: "65vh", maxWidth: "100%", objectFit: "contain", justifySelf: "center" } }) : error ? h3("p", { role: "alert" }, `Rendered slide unavailable: ${error}`) : h3("span", { role: "status" }, "Loading rendered slide\u2026"),
       h3("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, ...buttons, h3("button", { onClick: () => setSlide(Math.max(0, slide - 1)), disabled: slide === 0 }, "Previous"), h3("button", { onClick: () => setSlide(Math.min(selected.slideCount - 1, slide + 1)), disabled: slide >= selected.slideCount - 1 }, "Next")),
       h3("h4", null, "Critique scores"),

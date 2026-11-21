@@ -10,7 +10,7 @@ const onePixelPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAA
 test('native gallery browses saved PNG slides, critique and existing draft editor', async t => {
   const loaded = await loadPlugin(); t.after(loaded.cleanup)
   const contributions = [], calls = []
-  const creative = { id:'pkg-1', draftId:'draft-1', runId:'run-1', title:'Rendered fixture', status:'rendered-unapproved', iteration:'iteration-2', slideCount:2, slides:[{index:0,sha256:'a'},{index:1,sha256:'b'}], qualityReviews:[{dimension:'hook clarity',score:4}], hardBlockers:['rights pending'] }
+  const creative = { id:'0123456789abcdef0123456789abcdef01234567', draftId:'draft-1', runId:'run-1', title:'Rendered fixture', status:'rendered-unapproved', iteration:'iteration-2', slideCount:2, slides:[{index:0,sha256:'a'},{index:1,sha256:'b'}], qualityReviews:[{dimension:'hook clarity',score:4}], hardBlockers:['rights pending'] }
   const ctx = { register:x=>contributions.push(x), storage:{get:(_k,f)=>f,set(){}}, rest:async path=> {
     calls.push(path)
     if(path==='/health') return {version:1}
@@ -26,10 +26,10 @@ test('native gallery browses saved PNG slides, critique and existing draft edito
   await act(async()=>{renderer=TestRenderer.create(contributions.find(x=>x.id==='page').render()); await new Promise(r=>setTimeout(r,10))})
   t.after(()=>act(()=>renderer.unmount()))
   const click=async label=>{const b=renderer.root.findAllByType('button').find(x=>textOf(x).includes(label) || x.props['aria-label']===label);assert.ok(b,label);await act(async()=>{b.props.onClick();await new Promise(r=>setTimeout(r,0))})}
-  await click('Creatives'); await click('Rendered fixture')
-  assert.ok(calls.includes('/creative-previews/run-1/pkg-1/slides/0'))
+  await click('Creatives'); assert.match(textOf(renderer.toJSON()),/Revision 2/); assert.doesNotMatch(textOf(renderer.toJSON()),/0123456789abcdef0123456789abcdef01234567/); await click('Rendered fixture')
+  assert.ok(calls.includes('/creative-previews/run-1/0123456789abcdef0123456789abcdef01234567/slides/0'))
   await click('Show slide 2')
-  assert.ok(calls.includes('/creative-previews/run-1/pkg-1/slides/1'))
+  assert.ok(calls.includes('/creative-previews/run-1/0123456789abcdef0123456789abcdef01234567/slides/1'))
   assert.match(JSON.stringify(renderer.toJSON()),/hook clarity: 4.*rights pending/s)
   await click('Edit draft')
   assert.match(JSON.stringify(renderer.toJSON()),/Rendered fixture/)

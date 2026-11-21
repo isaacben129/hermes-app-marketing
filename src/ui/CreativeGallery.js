@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from 'react'
 
 const h = React.createElement
+const iterationLabel = value => {
+  const match = typeof value === 'string' && /^iteration-([0-9]+)$/.exec(value)
+  return match ? `Revision ${match[1]}` : 'Original'
+}
 function CreativeCover({ api, item }) {
   const [src, setSrc] = useState('')
   const [failed, setFailed] = useState(false)
@@ -47,12 +51,12 @@ export default function CreativeGallery({ api, openDraft, selectedApp = 'Cherry'
     h('h2', null, 'Generated creatives'),
     h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 } },
       ...items.map(item => h('button', { key: item.id, onClick: () => { setSelected(item); setSlide(0) }, style: { ...panel, color: 'inherit', textAlign: 'left', cursor: 'pointer' } },
-        h(CreativeCover, { api, item }), h('strong', null, item.title), h('span', null, `Unapproved · ${item.status}`), h('span', null, `${item.slideCount} rendered slides · ${item.iteration}`)))))
+        h(CreativeCover, { api, item }), h('strong', null, item.title), h('span', null, `Unapproved · ${item.status}`), h('span', null, `${item.slideCount} rendered slides · ${iterationLabel(item.iteration)}`)))))
   const buttons = selected.slides.map((_, i) => h('button', { key: i, onClick: () => setSlide(i), 'aria-label': `Show slide ${i + 1}`, 'aria-current': slide === i ? 'true' : undefined }, `Slide ${i + 1}`))
   const reviews = (selected.qualityReviews || []).map((r, i) => h('li', { key: i }, `${r.dimension}: ${r.score ?? 'not scored'}${r.rationale ? ` — ${r.rationale}` : ''}`))
   const blockers = (selected.hardBlockers || []).map((b, i) => h('p', { key: i }, `Blocker: ${typeof b === 'string' ? b : JSON.stringify(b)}`))
   return h('section', { style: { display: 'grid', gap: 14 } }, h('h2', null, 'Generated creatives'),
-    h('article', { style: panel }, h('h3', null, selected.title), h('span', { role: 'status' }, `Unapproved · ${selected.status} · ${selected.iteration}`),
+    h('article', { style: panel }, h('h3', null, selected.title), h('span', { role: 'status' }, `Unapproved · ${selected.status} · ${iterationLabel(selected.iteration)}`),
       image ? h('img', { alt: `${selected.title}, slide ${slide + 1}`, src: image, style: { maxHeight: '65vh', maxWidth: '100%', objectFit: 'contain', justifySelf: 'center' } }) : error ? h('p', { role: 'alert' }, `Rendered slide unavailable: ${error}`) : h('span', { role: 'status' }, 'Loading rendered slide…'),
       h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, ...buttons, h('button', { onClick: () => setSlide(Math.max(0, slide - 1)), disabled: slide === 0 }, 'Previous'), h('button', { onClick: () => setSlide(Math.min(selected.slideCount - 1, slide + 1)), disabled: slide >= selected.slideCount - 1 }, 'Next')),
       h('h4', null, 'Critique scores'), h('ul', null, ...reviews), ...blockers,
