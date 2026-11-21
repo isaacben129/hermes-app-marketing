@@ -1,4 +1,4 @@
-const ALLOWED = new Set(['POSTIZ_API_KEY', 'POSTIZ_BASE_URL', 'HERMES_MARKETING_DATA_DIR'])
+const ALLOWED = new Set(['POSTIZ_API_KEY', 'POSTIZ_BASE_URL'])
 
 export function parse(text) {
   const values = {}

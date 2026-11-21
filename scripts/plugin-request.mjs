@@ -11,10 +11,12 @@ import { LocalJobRunner } from '../src/jobs/runner.mjs'
 import { RendererClient } from '../src/service/renderer-client.mjs'
 import { RenderArtifacts } from '../src/service/artifacts.mjs'
 import { createDefaultPostizReader } from '../src/integrations/postiz.mjs'
+import { applySecrets } from '../src/ops/load-secrets.mjs'
 
 const chunks = []
 for await (const chunk of process.stdin) chunks.push(chunk)
 const input = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+await applySecrets()
 const dataDir = process.env.HERMES_MARKETING_DATA_DIR
 if (!dataDir || !path.isAbsolute(dataDir)) throw new Error('Absolute data directory required')
 await fs.mkdir(dataDir, { recursive: true, mode: 0o700 })
