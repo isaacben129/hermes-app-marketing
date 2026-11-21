@@ -12,10 +12,16 @@ import { LocalRendererClient } from '../src/service/local-renderer-client.mjs'
 import { RenderArtifacts } from '../src/service/artifacts.mjs'
 import { createDefaultPostizReader } from '../src/integrations/postiz.mjs'
 import { applySecrets } from '../src/ops/load-secrets.mjs'
+import { dispatchNativeDashboardRequest } from '../src/service/native-dashboard-client.mjs'
 
 const chunks = []
 for await (const chunk of process.stdin) chunks.push(chunk)
 const input = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+const nativeResponse = await dispatchNativeDashboardRequest(input, process.env)
+if (nativeResponse) {
+  process.stdout.write(JSON.stringify(nativeResponse))
+  process.exit(0)
+}
 await applySecrets()
 const dataDir = process.env.HERMES_MARKETING_DATA_DIR
 if (!dataDir || !path.isAbsolute(dataDir)) throw new Error('Absolute data directory required')
