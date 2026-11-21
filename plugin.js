@@ -225,6 +225,8 @@ function MarketingPage({ ctx }) {
   const [active, setActive] = useState(0);
   const [job, setJob] = useState(null);
   const [jobs, setJobs] = useState([]);
+  const [imageChoices, setImageChoices] = useState(null);
+  const [agentRun, setAgentRun] = useState(null);
   const [metricsText, setMetricsText] = useState("");
   const [profileText, setProfileText] = useState("");
   const [experimentText, setExperimentText] = useState('{"name":"Cherry concept test","policyVersion":"unconfigured"}');
@@ -391,15 +393,62 @@ function MarketingPage({ ctx }) {
     try {
       if (!ctx.files?.requestFolder || !ctx.files?.list || !ctx.files?.readDataUrl) throw new Error("Native folder access is unavailable; use the browser file picker.");
       const grant = await ctx.files.requestFolder();
-      if (!grant?.ok || !grant.folderId) throw new Error("Native image folder access was not granted.");
-      const listed = await ctx.files.list(grant.folderId);
-      const entry = (listed?.entries || []).find((item) => /\.(png|jpe?g|webp)$/i.test(item.path || item.name || ""));
-      if (!entry) throw new Error("No PNG, JPEG, or WebP image was found in the selected folder.");
-      const result = await ctx.files.readDataUrl(grant.folderId, entry.path || entry.name);
-      if (!result?.ok || !result.dataUrl) throw new Error("Could not read the selected native image.");
-      await acceptImage(index, result.dataUrl, `${grant.folderId}/${entry.path || entry.name}`, grant.folderId, entry.path || entry.name);
+      if (!grant?.ok || !grant.folder?.id) throw new Error("Native image folder access was not granted.");
+      const folderId = grant.folder.id;
+      const listed = await ctx.files.list(folderId, "");
+      if (!listed?.ok) throw new Error("Could not list the selected image folder. Its access may have been revoked.");
+      const entries = (listed.entries || []).filter((item) => !item.isDirectory && /\.(png|jpe?g|webp)$/i.test(item.path || item.name || ""));
+      if (!entries.length) throw new Error("No PNG, JPEG, or WebP image was found in the selected folder.");
+      setImageChoices({ index, folderId, entries });
     } catch (e) {
       setError(e.message || "Image attachment failed.");
+    }
+  };
+  const selectNativeImage = async (entry) => {
+    const choice = imageChoices;
+    if (!choice) return;
+    setImageChoices(null);
+    try {
+      const path = entry.path || entry.name;
+      const result = await ctx.files.readDataUrl(choice.folderId, path);
+      if (!result?.ok || !result.url) throw new Error("Could not read the selected native image. Its folder access may have been revoked.");
+      await acceptImage(choice.index, result.url, `${choice.folderId}/${path}`, choice.folderId, path);
+    } catch (e) {
+      setError(e.message || "Image attachment failed.");
+    }
+  };
+  const setQualityReview = (dimension, field, value) => {
+    const current = draft.qualityReviews || [];
+    const found = current.find((review2) => review2.dimension === dimension) || { dimension, score: null, reviewer: { type: "human", name: "" }, rationale: "", evidenceRefs: [], reviewedAt: (/* @__PURE__ */ new Date()).toISOString(), revision: workspace?.revision ?? 0 };
+    const review = { ...found, [field]: value };
+    const reviews = [...current.filter((item) => item.dimension !== dimension), review];
+    setDraft({ ...draft, qualityReviews: reviews });
+    setDirty(true);
+    setRendered(null);
+  };
+  const runAgent = async () => {
+    setError("");
+    setAgentRun({ status: "starting" });
+    try {
+      const started = await api("/agent-runs", { method: "POST", body: JSON.stringify({ app: "Cherry", count: 5 }) });
+      if (!started?.runId) throw new Error("Agent service did not return a run ID.");
+      setAgentRun(started);
+      const latest = await api(`/agent-runs/${encodeURIComponent(started.runId)}`);
+      setAgentRun(latest);
+      if (latest.status === "succeeded") await reload();
+    } catch (e) {
+      setAgentRun(null);
+      setError(e.message || "Agent run could not be started.");
+    }
+  };
+  const refreshAgentRun = async () => {
+    if (!agentRun?.runId) return;
+    try {
+      const latest = await api(`/agent-runs/${encodeURIComponent(agentRun.runId)}`);
+      setAgentRun(latest);
+      if (latest.status === "succeeded") await reload();
+    } catch (e) {
+      setError(e.message || "Agent run status could not be refreshed.");
     }
   };
   const runReview = async () => {
@@ -611,10 +660,14 @@ function MarketingPage({ ctx }) {
       input("Brief", draft.brief, (v) => edit(["brief"], v), true),
       input("Working hypothesis (unvalidated)", draft.hypothesis, (v) => edit(["hypothesis"], v), true),
       h3("h3", null, "Structured slides"),
-      ...(draft.slides || []).map((slide, i) => h3("section", { key: i, style: panel3 }, input(`Slide ${i + 1} headline`, slide.headline, (v) => edit(["slides", String(i), "headline"], v)), input(`Slide ${i + 1} body`, slide.body, (v) => edit(["slides", String(i), "body"], v), true), button(`Choose native image for slide ${i + 1}`, () => chooseNativeImage(i)), h3("label", { style: labelStyle }, "Browser fallback image picker", h3("input", { type: "file", accept: "image/png,image/jpeg,image/webp", onChange: (e) => attachImage(i, e.target.files?.[0]) })), h3("div", null, `Image: ${slide.selectedImage?.contentRef ? "saved service asset" : "not attached"} \xB7 rights status: ${slide.selectedImage?.rights || "unknown"}`))),
+      ...(draft.slides || []).map((slide, i) => h3("section", { key: i, style: panel3 }, input(`Slide ${i + 1} headline`, slide.headline, (v) => edit(["slides", String(i), "headline"], v)), input(`Slide ${i + 1} body`, slide.body, (v) => edit(["slides", String(i), "body"], v), true), button(`Choose native image for slide ${i + 1}`, () => chooseNativeImage(i)), h3("label", { style: labelStyle }, "Browser fallback image picker", h3("input", { type: "file", accept: "image/png,image/jpeg,image/webp", onChange: (e) => attachImage(i, e.target.files?.[0]) })), slide.selectedImage?.dataUrl ? h3("img", { alt: `Selected image for slide ${i + 1}`, src: slide.selectedImage.dataUrl, style: { maxWidth: 240, maxHeight: 240, objectFit: "contain" } }) : null, h3("div", null, `Image: ${slide.selectedImage?.contentRef ? "saved service asset" : slide.selectedImage?.dataUrl ? "selected image" : "not attached"} \xB7 rights status: ${slide.selectedImage?.rights || "unknown"}`))),
       button("Add slide", () => edit(["slides"], [...draft.slides || [], { headline: "", body: "", selectedImage: null }]))
     ),
-    h3("section", { style: panel3 }, h3("h3", null, "Source evidence and compliance inputs"), ...["claim", "rights", "cta", "channels", "events", "privacy"].map((k) => input(`${k} \xB7 unapproved until reviewed`, draft.source?.[k] ?? draft[k] ?? "", (v) => edit(["source", k], v))), h3("div", null, "These are operator inputs, not approvals. Rights, privacy, claims, and distribution remain blocked until the service review has evidence."), h3("h3", null, "Quality review \xB7 7 dimensions"), ...["clarity", "relevance", "specificity", "credibility", "brandFit", "accessibility", "craft"].map((k) => h3("section", { key: k, style: { display: "grid", gridTemplateColumns: "minmax(130px, 1fr) minmax(100px, 2fr)", gap: 8 } }, input(`${k} score (0\u20135; blank = unassessed)`, draft.qualityReviews?.[0]?.dimensions?.[k]?.score ?? "", (v) => edit(["qualityReviews", "0", "dimensions", k, "score"], v === "" ? "" : Number(v))), input(`${k} rationale and evidence pointer`, draft.qualityReviews?.[0]?.dimensions?.[k]?.rationale ?? "", (v) => edit(["qualityReviews", "0", "dimensions", k, "rationale"], v)))), input("Reviewer identity", draft.qualityReviews?.[0]?.reviewer ?? "", (v) => edit(["qualityReviews", "0", "reviewer"], v)), input("Review timestamp (ISO 8601)", draft.qualityReviews?.[0]?.reviewedAt ?? "", (v) => edit(["qualityReviews", "0", "reviewedAt"], v)), button("Run service review", runReview, !connected || dirty), h3("div", null, `Review status: ${draft.review?.status || draft.review || "not assessed"}`)),
+    imageChoices && h3("section", { style: panel3, role: "dialog", "aria-label": "Choose an image" }, h3("h3", null, "Choose an image"), ...imageChoices.entries.map((entry) => button(entry.path || entry.name, () => selectNativeImage(entry))), button("Cancel image selection", () => setImageChoices(null))),
+    h3("section", { style: panel3 }, h3("h3", null, "Source evidence and compliance inputs"), ...["claim", "rights", "cta", "channels", "events", "privacy"].map((k) => input(`${k} \xB7 unapproved until reviewed`, draft.source?.[k] ?? draft[k] ?? "", (v) => edit(["source", k], v))), h3("div", null, "These are operator inputs, not approvals. Rights, privacy, claims, and distribution remain blocked until the service review has evidence."), h3("h3", null, "Quality review \xB7 exact 7 dimension rubric"), h3("p", null, "Enter review notes and evidence pointers. These are manual attestations and do not approve claims, rights, or distribution."), ...["audience fit", "hook clarity", "claim specificity/proof", "slide progression/payoff", "mobile legibility/visual coherence", "promise-to-destination match", "safety/rights/brand"].map((dimension) => {
+      const review = draft.qualityReviews?.find((item) => item.dimension === dimension) || {};
+      return h3("section", { key: dimension, style: { display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(100px, 2fr)", gap: 8 } }, h3("strong", null, dimension), input(`${dimension} score (0\u20135; blank = unassessed)`, review.score ?? "", (value) => setQualityReview(dimension, "score", value === "" ? null : Number(value))), h3("label", { style: labelStyle }, `${dimension} review type`, h3("select", { "aria-label": `${dimension} review type`, value: review.reviewer?.type || "human", onChange: (e) => setQualityReview(dimension, "reviewer", { type: e.target.value, name: review.reviewer?.name || "" }), style: fieldStyle }, h3("option", { value: "human" }, "Human attestation"), h3("option", { value: "automated" }, "Automated review"))), input(`${dimension} reviewer name`, review.reviewer?.name || "", (value) => setQualityReview(dimension, "reviewer", { type: review.reviewer?.type || "human", name: value })), input(`${dimension} rationale`, review.rationale || "", (value) => setQualityReview(dimension, "rationale", value)), input(`${dimension} evidence refs (comma separated)`, (review.evidenceRefs || []).join(", "), (value) => setQualityReview(dimension, "evidenceRefs", value.split(",").map((ref) => ref.trim()).filter(Boolean))), input(`${dimension} reviewed at (ISO 8601)`, review.reviewedAt || "", (value) => setQualityReview(dimension, "reviewedAt", value)));
+    }), button("Run service review", runReview, !connected || dirty), h3("div", null, `Review status: ${draft.review?.status || draft.review || "not assessed"}`)),
     h3("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, button(dirty ? "Save to service" : `Saved \xB7 revision ${workspace?.revision ?? "\u2014"}`, saveDraft, !connected || !dirty), button("Render saved revision", render, !connected || dirty || !draft.id), button("Export rendered ZIP", exportZip, !rendered || !job)),
     renderPanel
   );
@@ -653,6 +706,7 @@ function MarketingPage({ ctx }) {
         button("New draft", createDraft, !connected)
       )
     ),
+    h3("section", { style: panel3 }, button("Generate and critique 5 Cherry slideshows", runAgent, !connected), h3("p", null, "Runs locally through the connected agent service. Results are unapproved; this action does not schedule or publish content."), agentRun && h3("div", null, h3("p", { role: "status", "aria-live": "polite" }, `Agent run ${agentRun.runId || ""}: ${agentRun.status}${agentRun.stage ? ` \xB7 ${agentRun.stage}` : ""}${agentRun.completedCount != null ? ` \xB7 ${agentRun.completedCount} completed` : ""}`), !["succeeded", "failed", "cancelled"].includes(agentRun.status) && button("Refresh agent run status", refreshAgentRun))),
     h3(SyntheticDemoBanner),
     h3(
       "section",
