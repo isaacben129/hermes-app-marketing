@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+import unittest
+
 from fastapi import APIRouter
 
 
@@ -39,3 +41,10 @@ def test_production_matcher_does_not_accept_catchall_or_partial_paths():
 
     router.add_api_route('/agent-runs/{run_id}', harmless, methods=['GET'])
     assert not native_request.route_matches(router.routes[-1], 'GET', '/agent-runs/not-a-full-match/extra')
+
+
+def load_tests(loader, tests, pattern):
+    """Include these behavioral functions in this repository's unittest gate."""
+    tests.addTest(unittest.FunctionTestCase(test_production_matcher_accepts_dynamic_slide_parameter_names))
+    tests.addTest(unittest.FunctionTestCase(test_production_matcher_does_not_accept_catchall_or_partial_paths))
+    return tests

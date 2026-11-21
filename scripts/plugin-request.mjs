@@ -19,7 +19,7 @@ for await (const chunk of process.stdin) chunks.push(chunk)
 const input = JSON.parse(Buffer.concat(chunks).toString('utf8'))
 const nativeResponse = await dispatchNativeDashboardRequest(input, process.env)
 if (nativeResponse) {
-  process.stdout.write(JSON.stringify(nativeResponse))
+  await new Promise((resolve, reject) => process.stdout.write(JSON.stringify(nativeResponse), error => error ? reject(error) : resolve()))
   process.exit(0)
 }
 await applySecrets()
