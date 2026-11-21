@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 import json
+import logging
 import os
 from pathlib import Path
 import shutil
@@ -71,9 +72,19 @@ def invoke(payload: dict, directory: Path):
             raise RuntimeError("Application runtime failed")
         response = json.loads(result.stdout)
         return JSONResponse(response["body"], status_code=response["status"])
-    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired, KeyError):
-        # Never return subprocess stderr: provider configuration may contain secrets.
-        return JSONResponse({"error": {"code": "backend_unavailable", "message": "Marketing backend could not complete this request. Check its runtime and private data directory.", "retryable": True}}, status_code=503)
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired, KeyError) as exc:
+        # Log only a fixed category, never exception text, stdout or stderr:
+        # child diagnostics and provider configuration may contain secrets.
+        if isinstance(exc, subprocess.TimeoutExpired):
+            code, message = "backend_timeout", "Marketing backend timed out. Retry after checking the backend host."
+        elif isinstance(exc, RuntimeError):
+            code, message = "backend_failed", "Marketing application process failed. Check its runtime and private data directory."
+        elif isinstance(exc, (ValueError, KeyError)):
+            code, message = "backend_invalid_response", "Marketing application returned an invalid response. Check the installed package version."
+        else:
+            code, message = "backend_unavailable", "Marketing backend could not start or access its private data directory."
+        logging.getLogger("hermes.plugins.marketing-system").warning("Marketing request failed: %s", code)
+        return JSONResponse({"error": {"code": code, "message": message, "retryable": True}}, status_code=503)
 
 
 @router.api_route("/{path:path}", methods=["GET", "PUT", "POST", "DELETE"])

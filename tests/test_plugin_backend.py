@@ -48,6 +48,27 @@ class PluginBackendTest(unittest.TestCase):
             self.assertTrue(list(Path(home).rglob('*.jsonl')), 'no durable ledger written under Hermes home')
 
 
+    def test_runtime_failure_is_diagnosable_without_leaking_child_output(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HERMES_HOME': home}):
+            client = self.load_client()
+            cases = [
+                (subprocess.CompletedProcess(['node'], 1, 'PRIVATE-STDOUT', 'PRIVATE-STDERR'), None, 'backend_failed'),
+                (None, subprocess.TimeoutExpired('node', 120, output='PRIVATE-STDOUT', stderr='PRIVATE-STDERR'), 'backend_timeout'),
+                (subprocess.CompletedProcess(['node'], 0, 'PRIVATE-STDOUT', 'PRIVATE-STDERR'), None, 'backend_invalid_response'),
+                (None, OSError('PRIVATE-STDERR'), 'backend_unavailable'),
+            ]
+            for result, error, code in cases:
+                with self.subTest(code=code):
+                    with patch('subprocess.run', return_value=result, side_effect=error), self.assertLogs('hermes.plugins.marketing-system', level='WARNING') as logs:
+                        response = client.get('/api/plugins/marketing-system/workspace?app=Cherry')
+                    self.assertEqual(response.status_code, 503)
+                    self.assertEqual(response.json()['error']['code'], code)
+                    combined = response.text + '\n'.join(logs.output)
+                    self.assertNotIn('PRIVATE-STDOUT', combined)
+                    self.assertNotIn('PRIVATE-STDERR', combined)
+                    self.assertIn(code, combined)
+
     def test_parallel_writes_only_one_expected_revision_wins(self):
         from concurrent.futures import ThreadPoolExecutor
         with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HERMES_HOME': home}):
