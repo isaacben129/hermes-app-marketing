@@ -91,6 +91,15 @@ export function createActions({ workspace, ledger, runner, renderer, artifacts, 
   const actions = {
     health,
     workspace: app => { if (!safeApp(app)) throw Object.assign(new TypeError('app is required'), { code: 'invalid_input' }); return workspace.load(app) },
+    draftImage: async ({ draftId, index }) => {
+      if (!safeId(draftId) || !Number.isSafeInteger(index) || index < 0) throw Object.assign(new TypeError('Invalid image identifier'), { code: 'invalid_input' })
+      const draft = await workspace.findDraft(draftId)
+      if (!draft) throw Object.assign(new Error('Draft missing'), { code: 'not_found' })
+      if (!Array.isArray(draft.slides) || index >= draft.slides.length) throw Object.assign(new TypeError('Image index is invalid'), { code: 'invalid_input' })
+      const payload = await workspace.rendererPayload({ ...draft, slides: [draft.slides[index]] })
+      const image = draft.slides[index].selectedImage
+      return { dataUrl: payload.slides[0].image_data_url, sha256: image.sha256, sourceRef: image.sourceRef }
+    },
     saveDraft: async input => {
       if (!safeApp(input?.draft?.app)) throw Object.assign(new TypeError('Draft app is invalid'), { code: 'invalid_input' })
       if (!Number.isSafeInteger(input?.expectedRevision) || input.expectedRevision < 0) throw Object.assign(new TypeError('expectedRevision is invalid'), { code: 'invalid_input' })

@@ -38,6 +38,7 @@ function MarketingPage({ ctx }) {
   const [experimentText, setExperimentText] = useState('{"name":"Cherry concept test","policyVersion":"unconfigured"}')
   const [observationText, setObservationText] = useState('[]')
   const generation = React.useRef(0)
+  const imageReadback = React.useRef(0)
   const headers = () => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' })
   const nativeBackend = typeof ctx.rest === 'function'
   const api = async (path, init = {}) => {
@@ -70,7 +71,25 @@ function MarketingPage({ ctx }) {
   useEffect(() => { if (nativeBackend || (ctx.storage.get('serviceUrl') && ctx.storage.get('serviceToken'))) connect(); return () => { generation.current++ } }, [])
   const reload = async () => { const req = ++generation.current; try { const data = await api(`/api/workspace?app=${encodeURIComponent(draft?.app || selectedApp)}`); if (req === generation.current) setWorkspace(data) } catch (e) { if (req === generation.current) setError(e.message) } }
   const edit = (path, value) => { setDraft(current => { const next = structuredClone(current); let target = next; path.slice(0, -1).forEach((part, i) => { const child = path[i + 1]; target = target[part] ??= (/^\d+$/.test(child) ? [] : {}) }); target[path.at(-1)] = value; return next }); setDirty(true); setRendered(null) }
-  const openDraft = item => { const copy = structuredClone(item); for (const slide of copy.slides || []) { const image = slide.selectedImage; if (image?.contentRef && !image.dataUrl && selectedImageData.has(image.sha256)) image.dataUrl = selectedImageData.get(image.sha256) }; setDraft(copy); setDirty(false); setRendered(null); setView('Slideshows'); setError('') }
+  const openDraft = item => {
+    const request = ++imageReadback.current
+    const copy = structuredClone(item)
+    for (const slide of copy.slides || []) { const image = slide.selectedImage; if (image?.contentRef && !image.dataUrl && selectedImageData.has(image.sha256)) image.dataUrl = selectedImageData.get(image.sha256) }
+    setDraft(copy); setDirty(false); setRendered(null); setView('Slideshows'); setError('')
+    for (const [index, slide] of (item.slides || []).entries()) {
+      const image = slide.selectedImage
+      if (!image?.contentRef || copy.slides[index]?.selectedImage?.dataUrl) continue
+      api(`/api/drafts/${encodeURIComponent(item.id)}/images/${index}`).then(value => {
+        if (request !== imageReadback.current || value.sha256 !== image.sha256) return
+        setDraft(current => {
+          if (request !== imageReadback.current || current?.id !== item.id) return current
+          const next = structuredClone(current); const currentImage = next.slides?.[index]?.selectedImage
+          if (!currentImage || currentImage.contentRef !== image.contentRef || currentImage.sha256 !== value.sha256) return current
+          currentImage.dataUrl = value.dataUrl; selectedImageData.set(value.sha256, value.dataUrl); return next
+        })
+      }).catch(() => {})
+    }
+  }
   const createDraft = async () => {
     const item = { id: `draft-${crypto.randomUUID()}`, app: selectedApp, title: `Untitled ${selectedApp} draft`, hook: '', slides: [], brief: '', hypothesis: '', source: { evidence: '', claim: 'unreviewed', rights: 'unknown' }, qualityReviews: [] }
     setDraft(item); setDirty(true); setView('Slideshows'); setNotice('New draft is local until saved to the service.')
@@ -80,7 +99,7 @@ function MarketingPage({ ctx }) {
     setBusy(true); setError('')
     try {
       const draftToSave = structuredClone(draft)
-      for (const slide of draftToSave.slides || []) { const image = slide.selectedImage; if (image?.contentRef && !image.dataUrl) { const retained = selectedImageData.get(image.sha256); if (!retained) throw new Error('The selected image bytes are no longer available in this UI session. Reattach the image before saving.') ; image.dataUrl = retained } }
+      for (const slide of draftToSave.slides || []) { const image = slide.selectedImage; if (image?.contentRef && !image.dataUrl && selectedImageData.has(image.sha256)) image.dataUrl = selectedImageData.get(image.sha256) }
       const result = await api(`/api/drafts/${encodeURIComponent(draftToSave.id)}`, { method: 'PUT', body: JSON.stringify({ draft: draftToSave, expectedRevision: workspace?.revision ?? 0 }) })
       const readback = await api(`/api/workspace?app=${encodeURIComponent(draft.app || selectedApp)}`)
       if (!readback.drafts?.some(item => item.id === draft.id)) throw new Error('Save succeeded but draft readback did not include this record.')

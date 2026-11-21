@@ -21,7 +21,7 @@ function errorResponse(res, status, code, origin) {
 }
 
 function statusFor(error) {
-  return ({ invalid_input: 400, stale_revision: 409, persistence_failed: 503, unavailable: 503, service_offline: 503, protocol_mismatch: 503, render_failed: 502, rate_limited: 429 })[error.code] ?? 400
+  return ({ invalid_input: 400, not_found: 404, stale_revision: 409, persistence_failed: 503, unavailable: 503, service_offline: 503, protocol_mismatch: 503, render_failed: 502, rate_limited: 429 })[error.code] ?? 400
 }
 
 export function createService({ actions, token, allowedOrigin = 'null' }) {
@@ -82,7 +82,14 @@ export function createService({ actions, token, allowedOrigin = 'null' }) {
     const profileMatch = /^\/api\/profiles\/([^/]+)$/.exec(url.pathname)
     const jobMatch = /^\/api\/jobs\/([^/]+)$/.exec(url.pathname)
     const retryMatch = /^\/api\/jobs\/([^/]+)\/retry$/.exec(url.pathname)
+    const draftImageMatch = /^\/api\/drafts\/([^/]+)\/images\/([^/]+)$/.exec(url.pathname)
     if (req.method === 'GET' && url.pathname === '/api/workspace') return invoke(() => actions.workspace(url.searchParams.get('app')))
+    if (req.method === 'GET' && draftImageMatch) {
+      let draftId
+      try { draftId = decodeURIComponent(draftImageMatch[1]) } catch { errorResponse(res, 400, 'invalid_input', corsOrigin); return }
+      if (!/^(0|[1-9]\d*)$/.test(draftImageMatch[2]) || !Number.isSafeInteger(Number(draftImageMatch[2]))) { errorResponse(res, 400, 'invalid_input', corsOrigin); return }
+      return invoke(() => actions.draftImage({ draftId, index: Number(draftImageMatch[2]) }))
+    }
     if (req.method === 'PUT' && profileMatch) {
       let app
       try { app = decodeURIComponent(profileMatch[1]) } catch { errorResponse(res, 400, 'invalid_input', corsOrigin); return }

@@ -21,7 +21,7 @@ test('registered UI uses live HTTP service through save, readback, render, previ
     loaded = await loadPlugin(); t.after(loaded.cleanup)
     const realFetch = globalThis.fetch; globalThis.fetch = (url, init = {}) => realFetch(url, { ...init, headers: { ...(init.headers || {}), Origin: 'null' } }); t.after(() => { globalThis.fetch = realFetch })
     const values = new Map([['serviceUrl', `http://127.0.0.1:${service.server.address().port}`], ['serviceToken', service.token]])
-    const registry = []; loaded.default.register({ storage: { get: (k, fallback) => values.has(k) ? values.get(k) : fallback, set: (k,v) => values.set(k,v) }, files: { requestFolder: async () => ({ ok: true, folderId: 'grant-e2e' }), list: async () => ({ entries: [{ path: 'assets/slide.png' }] }), readDataUrl: async () => ({ ok: true, dataUrl: `data:image/png;base64,${png}` }) }, register: item => registry.push(item) })
+    const registry = []; loaded.default.register({ storage: { get: (k, fallback) => values.has(k) ? values.get(k) : fallback, set: (k,v) => values.set(k,v) }, files: { requestFolder: async () => ({ ok: true, folder: { id: 'grant-e2e' } }), list: async () => ({ ok: true, entries: [{ path: 'assets/slide.png' }] }), readDataUrl: async () => ({ ok: true, url: `data:image/png;base64,${png}` }) }, register: item => registry.push(item) })
     const png = spawnSync('/opt/hermes/.venv/bin/python', ['-c', "from PIL import Image; import io,base64; b=io.BytesIO(); Image.new('RGB',(40,40),(20,80,140)).save(b,format='PNG'); print(base64.b64encode(b.getvalue()).decode())"], { encoding: 'utf8' }).stdout.trim()
     class Reader { readAsDataURL() { this.result = `data:image/png;base64,${png}`; this.onload() } }
     globalThis.FileReader = Reader
@@ -36,9 +36,9 @@ test('registered UI uses live HTTP service through save, readback, render, previ
       await act(async () => headline.props.onChange({ target: { value: `Headline ${i+1}` } }))
       const body = renderer.root.findAllByType('textarea').find(x => x.props['aria-label'] === `Slide ${i+1} body`)
       await act(async () => body.props.onChange({ target: { value: `Body ${i+1}` } }))
-      await click(`Choose native image for slide ${i+1}`)
+      await click(`Choose native image for slide ${i+1}`); await click('assets/slide.png')
     }
-    await click('Save to service'); for (let i=0;i<100 && !renderer.root.findAllByProps({role:'status'}).some(x=>x.children.join('').includes('Saved and verified'));i++) await new Promise(r=>setTimeout(r,20)); await act(async()=>{}); await click('Overview');
+    await click('Save to service'); for (let i=0;i<100 && !renderer.root.findAllByProps({role:'status'}).some(x=>x.children.join('').includes('Saved and verified'));i++) await new Promise(r=>setTimeout(r,20)); await act(async()=>{}); await click('Overview')
     const allButtons = renderer.root.findAllByType('button')
     const getText = (node) => {
       if (!node) return ''
@@ -48,11 +48,12 @@ test('registered UI uses live HTTP service through save, readback, render, previ
       if (node.children) return getText(node.children)
       return ''
     }
+    for (let i=0;i<100 && !renderer.root.findAllByType('button').some(node => getText(node).includes('Untitled Cherry draft'));i++) await act(async () => { await new Promise(r => setTimeout(r, 20)) })
     const draftBtn = allButtons.find(node => getText(node).includes('Untitled Cherry draft'))
     assert.ok(draftBtn, 'missing draft button')
     await act(async () => { await draftBtn.props.onClick(); await tick() })
-    const reopenedBody = renderer.root.findAllByType('textarea').find(x => x.props['aria-label'] === 'Slide 1 body'); await act(async () => reopenedBody.props.onChange({ target: { value: 'Body 1 revised after readback' } })); await click('Save to service'); for (let i=0;i<100 && !renderer.root.findAllByProps({role:'status'}).some(x=>x.children.join('').includes('Saved and verified'));i++) await new Promise(r=>setTimeout(r,20)); await act(async()=>{})
-    const ws = await (await fetch(`${values.get('serviceUrl')}/api/workspace?app=Cherry`, { headers: { Authorization: `Bearer ${service.token}`, Origin: 'null' } })).json(); assert.equal(ws.drafts[0].slides.length, 2); assert.ok(ws.drafts[0].slides.every(slide => /^image:[a-f0-9]{64}$/.test(slide.selectedImage.contentRef))); await click('Render saved revision')
+    const reopenedBody = renderer.root.findAllByType('textarea').find(x => x.props['aria-label'] === 'Slide 1 body'); await act(async () => reopenedBody.props.onChange({ target: { value: 'Body 1 revised after readback' } })); await click('Save to service'); for (let i=0;i<100 && !renderer.root.findAllByProps({role:'status'}).some(x=>x.children.join('').includes('revision 2'));i++) await act(async () => { await new Promise(r=>setTimeout(r,20)) })
+    const ws = await (await fetch(`${values.get('serviceUrl')}/api/workspace?app=Cherry`, { headers: { Authorization: `Bearer ${service.token}`, Origin: 'null' } })).json(); assert.equal(ws.drafts[0].slides.length, 2); assert.ok(ws.drafts[0].slides.every(slide => /^image:[a-f0-9]{64}$/.test(slide.selectedImage?.contentRef)), JSON.stringify(ws.drafts[0].slides)); await click('Render saved revision')
     const jobResponse = await fetch(`${values.get('serviceUrl')}/api/jobs` , { headers: { Authorization: `Bearer ${service.token}` } }); const jobs = await jobResponse.json()
     assert.equal(jobs[0].status, 'succeeded'); assert.deepEqual(jobs[0].events.map(x => x.status), ['queued','running','succeeded'])
 
