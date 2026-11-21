@@ -227,6 +227,7 @@ function MarketingPage({ ctx }) {
   const [jobs, setJobs] = useState([]);
   const [imageChoices, setImageChoices] = useState(null);
   const [agentRun, setAgentRun] = useState(null);
+  const [agentRuns, setAgentRuns] = useState([]);
   const [metricsText, setMetricsText] = useState("");
   const [profileText, setProfileText] = useState("");
   const [experimentText, setExperimentText] = useState('{"name":"Cherry concept test","policyVersion":"unconfigured"}');
@@ -269,6 +270,22 @@ function MarketingPage({ ctx }) {
       setWorkspace(data);
       setConnected(true);
       setNotice("Connected to the marketing service. Workspace records are service-owned.");
+      setBusy(false);
+      try {
+        const listed = await api("/agent-runs");
+        const runs = Array.isArray(listed?.runs) ? listed.runs : [];
+        if (request !== generation.current) return;
+        setAgentRuns(runs);
+        if (runs[0]?.runId) {
+          const latest = await api(`/agent-runs/${encodeURIComponent(runs[0].runId)}`);
+          if (request === generation.current) {
+            setAgentRun(latest);
+            if (latest.status === "succeeded") await reload();
+          }
+        } else setAgentRun(null);
+      } catch (e) {
+        if (request === generation.current) setNotice(`Connected to the marketing service. Saved agent runs are unavailable: ${e.message || "run history could not be loaded."}`);
+      }
     } catch (e) {
       if (request === generation.current) setError(e.message || "Marketing service is unavailable.");
     } finally {
@@ -460,11 +477,25 @@ function MarketingPage({ ctx }) {
     try {
       const latest = await api(`/agent-runs/${encodeURIComponent(agentRun.runId)}`);
       setAgentRun(latest);
-      if (latest.status === "succeeded") await reload();
+      if (latest.status === "succeeded" && agentRun.status !== "succeeded") await reload();
     } catch (e) {
       setError(e.message || "Agent run status could not be refreshed.");
     }
   };
+  const openAgentRun = async (runId) => {
+    try {
+      setAgentRun(await api(`/agent-runs/${encodeURIComponent(runId)}`));
+    } catch (e) {
+      setError(`Saved agent run details are unavailable: ${e.message || "request failed."}`);
+    }
+  };
+  useEffect(() => {
+    if (!connected || !agentRun?.runId || agentRun.status !== "running") return;
+    const timer = setInterval(() => {
+      refreshAgentRun();
+    }, 2e3);
+    return () => clearInterval(timer);
+  }, [connected, agentRun?.runId, agentRun?.status]);
   const runReview = async () => {
     try {
       const out = await api("/api/review", { method: "POST", body: JSON.stringify({ draftId: draft.id, revision: workspace.revision }) });
@@ -720,7 +751,7 @@ function MarketingPage({ ctx }) {
         button("New draft", createDraft, !connected)
       )
     ),
-    h3("section", { style: panel3 }, button("Generate and critique 5 Cherry slideshows", runAgent, !connected), h3("p", null, "Runs locally through the connected agent service. Results are unapproved; this action does not schedule or publish content."), agentRun && h3("div", null, h3("p", { role: "status", "aria-live": "polite" }, `Agent run ${agentRun.runId || ""}: ${agentRun.status}${agentRun.stage ? ` \xB7 ${agentRun.stage}` : ""}${agentRun.completedCount != null ? ` \xB7 ${agentRun.completedCount} completed` : ""}`), !["succeeded", "failed", "cancelled"].includes(agentRun.status) && button("Refresh agent run status", refreshAgentRun))),
+    h3("section", { style: panel3 }, button("Generate and critique 5 Cherry slideshows", runAgent, !connected), h3("p", null, "Runs locally through the connected agent service. Results are unapproved; this action does not schedule or publish content."), agentRuns.length > 0 && h3("div", { "aria-label": "Saved agent runs" }, h3("strong", null, `${agentRuns.length} saved agent run${agentRuns.length === 1 ? "" : "s"}`), ...agentRuns.map((run) => button(`Open run ${run.runId} \xB7 ${run.status}`, () => openAgentRun(run.runId)))), agentRun && h3("div", null, h3("p", { role: "status", "aria-live": "polite" }, `Agent run ${agentRun.runId || ""}: ${agentRun.status}${agentRun.stage ? ` \xB7 ${agentRun.stage}` : ""}${agentRun.completedCount != null ? ` \xB7 ${agentRun.completedCount} completed` : ""}`), !["succeeded", "failed", "cancelled", "interrupted"].includes(agentRun.status) && button("Refresh agent run status", refreshAgentRun))),
     h3(SyntheticDemoBanner),
     h3(
       "section",

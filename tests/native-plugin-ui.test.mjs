@@ -47,7 +47,8 @@ test('quality editor exposes exact rubric inputs and manual Cherry agent run use
     if (path === '/health') return { version: 1 }
     if (path.startsWith('/workspace?app=Cherry')) return { revision, drafts: [draft], profiles: [] }
     if (path.startsWith('/drafts/')) { assert.equal(opts.body.expectedRevision, revision); draft = opts.body.draft; revision++; return { revision } }
-    if (path === '/agent-runs') return { runId: 'run-1', status: 'running' }
+    if (path === '/agent-runs' && opts.method === 'POST') return { runId: 'run-1', status: 'running' }
+    if (path === '/agent-runs') return { runtime: {}, runs: [] }
     if (path === '/agent-runs/run-1') return { runId: 'run-1', status: 'succeeded', completedCount: 5, draftIds: ['new-1'] }
     throw new Error(`unexpected ${path}`)
   } }
@@ -70,7 +71,7 @@ test('quality editor exposes exact rubric inputs and manual Cherry agent run use
   assert.deepEqual(draft.qualityReviews.map(review => review.dimension), dimensions)
   for (const review of draft.qualityReviews) { assert.deepEqual(Object.keys(review).sort(), ['dimension', 'evidenceRefs', 'rationale', 'reviewedAt', 'reviewer', 'revision', 'score']); assert.deepEqual(review.reviewer, { type: 'human', name: 'operator' }); assert.deepEqual(review.evidenceRefs, ['evidence-1']); assert.equal(review.score, 4); assert.equal(review.revision, 3) }
   await click('Overview'); await click('Generate and critique 5 Cherry slideshows')
-  const post = calls.find(call => call.path === '/agent-runs')
+  const post = calls.find(call => call.path === '/agent-runs' && call.opts.method === 'POST')
   assert.deepEqual(post.opts.body, { app: 'Cherry', count: 5 })
   assert.ok(calls.some(call => call.path === '/agent-runs/run-1'))
   assert.match(JSON.stringify(renderer.toJSON()), /unapproved|succeeded/i)

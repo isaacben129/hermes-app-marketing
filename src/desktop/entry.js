@@ -33,6 +33,7 @@ function MarketingPage({ ctx }) {
   const [jobs, setJobs] = useState([])
   const [imageChoices, setImageChoices] = useState(null)
   const [agentRun, setAgentRun] = useState(null)
+  const [agentRuns, setAgentRuns] = useState([])
   const [metricsText, setMetricsText] = useState('')
   const [profileText, setProfileText] = useState('')
   const [experimentText, setExperimentText] = useState('{"name":"Cherry concept test","policyVersion":"unconfigured"}')
@@ -65,6 +66,17 @@ function MarketingPage({ ctx }) {
       const data = await api(`/api/workspace?app=${encodeURIComponent(selectedApp)}`)
       if (request !== generation.current) return
       setHealth(health); setWorkspace(data); setConnected(true); setNotice('Connected to the marketing service. Workspace records are service-owned.')
+      setBusy(false)
+      try {
+        const listed = await api('/agent-runs')
+        const runs = Array.isArray(listed?.runs) ? listed.runs : []
+        if (request !== generation.current) return
+        setAgentRuns(runs)
+        if (runs[0]?.runId) {
+          const latest = await api(`/agent-runs/${encodeURIComponent(runs[0].runId)}`)
+          if (request === generation.current) { setAgentRun(latest); if (latest.status === 'succeeded') await reload() }
+        } else setAgentRun(null)
+      } catch (e) { if (request === generation.current) setNotice(`Connected to the marketing service. Saved agent runs are unavailable: ${e.message || 'run history could not be loaded.'}`) }
     } catch (e) { if (request === generation.current) setError(e.message || 'Marketing service is unavailable.') }
     finally { if (request === generation.current) setBusy(false) }
   }
@@ -173,9 +185,18 @@ function MarketingPage({ ctx }) {
     try {
       const latest = await api(`/agent-runs/${encodeURIComponent(agentRun.runId)}`)
       setAgentRun(latest)
-      if (latest.status === 'succeeded') await reload()
+      if (latest.status === 'succeeded' && agentRun.status !== 'succeeded') await reload()
     } catch (e) { setError(e.message || 'Agent run status could not be refreshed.') }
   }
+  const openAgentRun = async runId => {
+    try { setAgentRun(await api(`/agent-runs/${encodeURIComponent(runId)}`)) }
+    catch (e) { setError(`Saved agent run details are unavailable: ${e.message || 'request failed.'}`) }
+  }
+  useEffect(() => {
+    if (!connected || !agentRun?.runId || agentRun.status !== 'running') return
+    const timer = setInterval(() => { refreshAgentRun() }, 2000)
+    return () => clearInterval(timer)
+  }, [connected, agentRun?.runId, agentRun?.status])
   const runReview = async () => { try { const out = await api('/api/review', { method: 'POST', body: JSON.stringify({ draftId: draft.id, revision: workspace.revision }) }); setNotice(`Review: ${out.readiness?.status || 'blocked'} · ${out.quality?.status || 'quality assessment returned'}`); await reload() } catch (e) { setError(e.message) } }
   const render = async () => { try { const out = await api('/api/render', { method: 'POST', body: JSON.stringify({ jobId: crypto.randomUUID(), draftId: draft.id, revision: workspace.revision }) }); const actualJob = await api(`/api/jobs/${encodeURIComponent(out.jobId)}`); setJob(actualJob); setJobs(current => [actualJob, ...current.filter(item => item.id !== actualJob.id)]); setRendered(out.rendered); setActive(0); setNotice(`Rendered saved revision · ${actualJob.status}.`) } catch (e) { setError(e.message) } }
   const exportZip = async () => { try { const out = await api('/api/export', { method: 'POST', body: JSON.stringify({ draftId: draft.id, revision: workspace.revision, renderJobId: job?.id }) }); const bin = atob(out.zipBase64); const bytes = Uint8Array.from(bin, c => c.charCodeAt(0)); const a = document.createElement('a'); const objectUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/zip' })); a.href = objectUrl; a.download = 'marketing-slideshow.zip'; a.click(); URL.revokeObjectURL(objectUrl); setNotice(`Exported service artifact · ${out.manifest?.files?.length ?? 'verified'} files.`) } catch (e) { setError(e.message) } }
@@ -301,7 +322,7 @@ function MarketingPage({ ctx }) {
           button('New draft', createDraft, !connected)
         )
       ),
-      h('section', { style: panel }, button('Generate and critique 5 Cherry slideshows', runAgent, !connected), h('p', null, 'Runs locally through the connected agent service. Results are unapproved; this action does not schedule or publish content.'), agentRun && h('div', null, h('p', { role: 'status', 'aria-live': 'polite' }, `Agent run ${agentRun.runId || ''}: ${agentRun.status}${agentRun.stage ? ` · ${agentRun.stage}` : ''}${agentRun.completedCount != null ? ` · ${agentRun.completedCount} completed` : ''}`), !['succeeded', 'failed', 'cancelled'].includes(agentRun.status) && button('Refresh agent run status', refreshAgentRun))),
+      h('section', { style: panel }, button('Generate and critique 5 Cherry slideshows', runAgent, !connected), h('p', null, 'Runs locally through the connected agent service. Results are unapproved; this action does not schedule or publish content.'), agentRuns.length > 0 && h('div', { 'aria-label': 'Saved agent runs' }, h('strong', null, `${agentRuns.length} saved agent run${agentRuns.length === 1 ? '' : 's'}`), ...agentRuns.map(run => button(`Open run ${run.runId} · ${run.status}`, () => openAgentRun(run.runId)))), agentRun && h('div', null, h('p', { role: 'status', 'aria-live': 'polite' }, `Agent run ${agentRun.runId || ''}: ${agentRun.status}${agentRun.stage ? ` · ${agentRun.stage}` : ''}${agentRun.completedCount != null ? ` · ${agentRun.completedCount} completed` : ''}`), !['succeeded', 'failed', 'cancelled', 'interrupted'].includes(agentRun.status) && button('Refresh agent run status', refreshAgentRun))),
       h(SyntheticDemoBanner),
       h('section', {
         style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 },
