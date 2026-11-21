@@ -36,6 +36,16 @@ class CherryBatchRunnerTest(unittest.TestCase):
             self.assertEqual(len(record['results']), 5)
             self.assertEqual(len(calls), 20)
 
+    def test_unjudged_dimension_may_have_no_render_evidence_but_scored_dimensions_require_it(self):
+        reviews = [{'dimension': d, 'score': 3, 'rationale': 'Fixture', 'evidenceRefs': ['rendered/slide-01.png']} for d in batch.DIMENSIONS]
+        reviews[4].update(score=None, rationale='Exact rendered PNGs were not supplied.', evidenceRefs=[])
+        value = batch._normalize_critique({'reviews': reviews, 'hardBlockers': [], 'lessons': []})
+        self.assertIsNone(value['reviews'][4]['score'])
+        self.assertEqual(value['reviews'][4]['evidenceRefs'], [])
+        reviews[4]['score'] = 3
+        with self.assertRaisesRegex(RuntimeError, 'critic_output_invalid'):
+            batch._normalize_critique({'reviews': reviews, 'hardBlockers': [], 'lessons': []})
+
     def test_codex_execution_uses_fixed_model_readonly_ephemeral_cli_and_records_real_session_id(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / 'message.json'

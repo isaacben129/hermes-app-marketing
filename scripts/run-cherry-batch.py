@@ -101,7 +101,7 @@ def _normalize_critique(value, final=False, rendered=None, context=None):
         if not isinstance(review, dict) or review.get('dimension') != dimension: raise RuntimeError('critic_output_invalid')
         score = review.get('score')
         if score is not None and (type(score) is not int or not 0 <= score <= 5): raise RuntimeError('critic_output_invalid')
-        if not isinstance(review.get('rationale'), str) or not review['rationale'].strip() or not isinstance(review.get('evidenceRefs'), list) or not review['evidenceRefs']: raise RuntimeError('critic_output_invalid')
+        if not isinstance(review.get('rationale'), str) or not review['rationale'].strip() or not isinstance(review.get('evidenceRefs'), list) or (score is not None and not review['evidenceRefs']): raise RuntimeError('critic_output_invalid')
         if final and any(ref not in {item['file'] for item in rendered or []} for ref in review['evidenceRefs']): raise RuntimeError('critic_output_invalid')
         output.append({**review, 'reviewer': {'type': 'automated', 'name': 'Codex independent critic'}, 'reviewedAt': now()})
     value['reviews'] = output
