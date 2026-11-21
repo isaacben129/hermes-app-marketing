@@ -13,12 +13,15 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path: sys.path.insert(0, str(ROOT))
+from dashboard.agent_runs import get_run, list_runs, start_run
 
 router = APIRouter()
-ROOT = Path(__file__).resolve().parents[1]
 MAX_BODY_BYTES = 64_000_000
 
 
@@ -85,6 +88,38 @@ def invoke(payload: dict, directory: Path):
             code, message = "backend_unavailable", "Marketing backend could not start or access its private data directory."
         logging.getLogger("hermes.plugins.marketing-system").warning("Marketing request failed: %s", code)
         return JSONResponse({"error": {"code": code, "message": message, "retryable": True}}, status_code=503)
+
+
+@router.post("/agent-runs")
+async def create_agent_run(request: Request):
+    try: body = await request.json()
+    except ValueError: return JSONResponse({"error": {"code": "invalid_input", "message": "Check the named fields and request schema."}}, status_code=400)
+    try: directory = data_dir()
+    except ValueError: return JSONResponse({"error": {"code": "invalid_input", "message": "Invalid backend data directory."}}, status_code=400)
+    result, status = start_run(directory, body, ROOT)
+    if status == 202: return JSONResponse(result, status_code=status)
+    details = {
+        400: ("invalid_input", "Check the named fields and request schema."),
+        429: ("rate_limited", "A Cherry batch is already running for this profile."),
+        503: ("unavailable", "Prepared Cherry context, approved local assets, or the authoring CLI is unavailable."),
+    }
+    code, message = details[status]
+    return JSONResponse({"error": {"code": code, "message": message, "retryable": status != 400}}, status_code=status)
+
+
+@router.get("/agent-runs")
+async def read_agent_runs():
+    try: return list_runs(data_dir())
+    except ValueError: return JSONResponse({"error": {"code": "invalid_input", "message": "Invalid backend data directory."}}, status_code=400)
+
+
+@router.get("/agent-runs/{run_id}")
+async def read_agent_run(run_id: str):
+    try: directory = data_dir()
+    except ValueError: return JSONResponse({"error": {"code": "invalid_input", "message": "Invalid backend data directory."}}, status_code=400)
+    record = get_run(directory, run_id)
+    if record is None: return JSONResponse({"error": {"code": "invalid_input", "message": "Run not found."}}, status_code=404)
+    return record
 
 
 @router.api_route("/{path:path}", methods=["GET", "PUT", "POST", "DELETE"])

@@ -95,6 +95,38 @@ class PluginBackendTest(unittest.TestCase):
             finally:
                 reset_hermes_home_override(token)
 
+    def test_agent_run_routes_validate_cherry_count_and_fail_closed_without_prepared_context(self):
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HERMES_HOME': home}):
+            client = self.load_client()
+            root = '/api/plugins/marketing-system/agent-runs'
+            self.assertEqual(client.post(root, json={'app': 'Other', 'count': 5}).status_code, 400)
+            self.assertEqual(client.post(root, json={'app': 'Cherry', 'count': 4}).status_code, 400)
+            self.assertEqual(client.post(root, json={'app': 'Cherry', 'count': 5, 'command': 'echo unsafe'}).status_code, 400)
+            denied = client.post(root, json={'app': 'Cherry', 'count': 5})
+            self.assertEqual(denied.status_code, 503, denied.text)
+            self.assertEqual(denied.json()['error']['code'], 'unavailable')
+            self.assertEqual(client.get(root).status_code, 200)
+            self.assertEqual(client.get(root + '/arbitrary').status_code, 404)
+
+    def test_agent_run_store_listing_has_expected_shape(self):
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HERMES_HOME': home}):
+            result = self.load_client().get('/api/plugins/marketing-system/agent-runs')
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json(), {'runs': []})
+
+    def test_agent_run_detail_route_returns_durable_state_for_server_id(self):
+        import json
+        run_id = 'a' * 32
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HERMES_HOME': home}):
+            folder = Path(home) / 'plugin-data' / 'marketing-system' / 'agent-runs' / run_id
+            folder.mkdir(parents=True)
+            (folder / 'run.json').write_text(json.dumps({'runId': run_id, 'app': 'Cherry', 'count': 5, 'status': 'running', 'stage': 'package-1-initial-author', 'completedCount': 0, 'errors': [], 'results': []}))
+            client = self.load_client()
+            detail = client.get('/api/plugins/marketing-system/agent-runs/' + run_id)
+            self.assertEqual(detail.status_code, 200, detail.text)
+            self.assertEqual(detail.json()['stage'], 'package-1-initial-author')
+            self.assertEqual(detail.json()['completedCount'], 0)
+
 
 if __name__ == '__main__':
     unittest.main()

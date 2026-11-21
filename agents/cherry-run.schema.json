@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title", "slides", "assetIds", "sourceRefs", "claimNotes"],
+  "properties": {
+    "title": {"type": "string", "minLength": 1, "maxLength": 120},
+    "slides": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"type": "object", "additionalProperties": false, "required": ["headline", "body", "textPosition", "assetId"], "properties": {"headline": {"type": "string", "minLength": 1, "maxLength": 100}, "body": {"type": "string", "minLength": 1, "maxLength": 240}, "textPosition": {"enum": ["top", "center", "bottom"]}, "assetId": {"type": "string"}}}},
+    "assetIds": {"type": "array", "items": {"type": "string"}},
+    "sourceRefs": {"type": "array", "items": {"type": "string"}},
+    "claimNotes": {"type": "array", "items": {"type": "string"}}
+  }
+}
