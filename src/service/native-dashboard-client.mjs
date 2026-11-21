@@ -11,7 +11,7 @@ export function isNativeDashboardRequest(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.path !== 'string' || typeof input.method !== 'string') return false
   const pathOnly = input.path.split('?', 1)[0]
   if (input.path.includes('..') || input.path.includes('#') || input.path.includes('\\')) return false
-  if (input.method === 'GET' && (/^\/api\/creative-previews(?:\?.*)?$/.test(input.path) || /^\/api\/agent-runs(?:\/[a-f0-9]{32})?$/.test(pathOnly))) return true
+  if (input.method === 'GET' && (/^\/api\/creative-previews(?:\?.*)?$/.test(input.path) || /^\/api\/agent-runs(?:\/[a-f0-9]{32})?$/.test(pathOnly) || /^\/api\/creative-previews\/[a-f0-9]{32}\/[A-Za-z0-9_-]+\/slides\/(?:0|[1-9][0-9]*)(?:\?.*)?$/.test(input.path))) return true
   return input.method === 'POST' && pathOnly === '/api/agent-runs' && !input.path.includes('?')
 }
 

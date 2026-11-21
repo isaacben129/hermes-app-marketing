@@ -23,7 +23,8 @@ def main():
     data_dir = os.environ.get('HERMES_MARKETING_DATA_DIR', '')
     if not Path(data_dir).is_absolute() or '\0' in data_dir or '..' in Path(data_dir).parts:
         raise ValueError()
-    allowed = (method == 'GET' and (parsed.path == '/api/creative-previews' or parsed.path == '/api/agent-runs' or re.fullmatch(r'/api/agent-runs/[a-f0-9]{32}', parsed.path))) or (method == 'POST' and parsed.path == '/api/agent-runs' and not parsed.query)
+    slide_path = re.fullmatch(r'/api/creative-previews/[a-f0-9]{32}/[A-Za-z0-9_-]+/slides/(?:0|[1-9][0-9]*)', parsed.path)
+    allowed = (method == 'GET' and (parsed.path == '/api/creative-previews' or parsed.path == '/api/agent-runs' or re.fullmatch(r'/api/agent-runs/[a-f0-9]{32}', parsed.path) or slide_path)) or (method == 'POST' and parsed.path == '/api/agent-runs' and not parsed.query)
     if not allowed:
         raise ValueError()
 
@@ -42,7 +43,9 @@ def main():
         and getattr(route, 'endpoint', None).__name__ != 'application_request'
         and (getattr(route, 'path', None) == route_path
              or (getattr(route, 'path', None) == '/agent-runs/{run_id}'
-                 and re.fullmatch(r'/agent-runs/[a-f0-9]{32}', route_path)))
+                 and re.fullmatch(r'/agent-runs/[a-f0-9]{32}', route_path))
+             or (getattr(route, 'path', None) == '/creative-previews/{run_id}/{package_id}/slides/{index}'
+                 and slide_path))
         for route in plugin_api.router.routes
     )
     if not direct:
