@@ -37,23 +37,35 @@ function MarketingPage({ ctx }) {
   const [observationText, setObservationText] = useState('[]')
   const generation = React.useRef(0)
   const headers = () => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' })
-  const api = async (path, init = {}) => { const origin = localServiceOrigin(base); return json(await fetch(`${origin}${path}`, { ...init, headers: { ...headers(), ...(init.headers || {}) } })) }
+  const nativeBackend = typeof ctx.rest === 'function'
+  const api = async (path, init = {}) => {
+    if (nativeBackend) {
+      try {
+        const { body, headers: _headers, ...options } = init
+        const data = await ctx.rest(path.replace(/^\/api(?=\/)/, ''), { ...options, ...(body !== undefined ? { body: typeof body === 'string' ? JSON.parse(body) : body } : {}), timeoutMs: 125000 })
+        if (data?.error) throw Object.assign(new Error(data.error.message || data.error.code || 'Marketing backend request failed.'), data.error)
+        return data
+      } catch (error) { throw new Error(`Hermes backend: ${error.message || 'unavailable'}. If disabled, enable App Marketing on this connection and retry.`) }
+    }
+    // Retained only for the standalone local-service preview/legacy SDK.
+    const origin = localServiceOrigin(base)
+    return json(await fetch(`${origin}${path}`, { ...init, headers: { ...headers(), ...(init.headers || {}) } }))
+  }
   const connect = async () => {
     setError(''); setBusy(true); setConnected(false); setWorkspace(null)
     const request = ++generation.current
     try {
-      const origin = localServiceOrigin(base)
-      const health = await json(await fetch(`${origin}/api/health`))
+      const health = await api('/api/health')
       if (request !== generation.current) return
       if (!health) throw new Error('Service health response was empty.')
-      ctx.storage.set('serviceUrl', base); ctx.storage.set('serviceToken', token)
+      if (!nativeBackend) { ctx.storage.set('serviceUrl', base); ctx.storage.set('serviceToken', token) }
       const data = await api(`/api/workspace?app=${encodeURIComponent(selectedApp)}`)
       if (request !== generation.current) return
       setHealth(health); setWorkspace(data); setConnected(true); setNotice('Connected to the marketing service. Workspace records are service-owned.')
     } catch (e) { if (request === generation.current) setError(e.message || 'Marketing service is unavailable.') }
     finally { if (request === generation.current) setBusy(false) }
   }
-  useEffect(() => { if (ctx.storage.get('serviceUrl') && ctx.storage.get('serviceToken')) connect() }, [])
+  useEffect(() => { if (nativeBackend || (ctx.storage.get('serviceUrl') && ctx.storage.get('serviceToken'))) connect(); return () => { generation.current++ } }, [])
   const reload = async () => { const req = ++generation.current; try { const data = await api(`/api/workspace?app=${encodeURIComponent(draft?.app || selectedApp)}`); if (req === generation.current) setWorkspace(data) } catch (e) { if (req === generation.current) setError(e.message) } }
   const edit = (path, value) => { setDraft(current => { const next = structuredClone(current); let target = next; path.slice(0, -1).forEach((part, i) => { const child = path[i + 1]; target = target[part] ??= (/^\d+$/.test(child) ? [] : {}) }); target[path.at(-1)] = value; return next }); setDirty(true); setRendered(null) }
   const openDraft = item => { const copy = structuredClone(item); for (const slide of copy.slides || []) { const image = slide.selectedImage; if (image?.contentRef && !image.dataUrl && selectedImageData.has(image.sha256)) image.dataUrl = selectedImageData.get(image.sha256) }; setDraft(copy); setDirty(false); setRendered(null); setView('Slideshows'); setError('') }
@@ -209,7 +221,7 @@ function MarketingPage({ ctx }) {
   }, h('div', null, h('div', { style: { fontWeight: 500, fontSize: '0.95rem' } }, item.title || item.id), h('div', { style: { fontSize: '0.8rem', color: 'var(--ui-text-tertiary)' } }, `Revision ${item.revision || workspace?.revision || '—'} · ${item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : 'No date'}`)), h('span', { style: { padding: '3px 8px', borderRadius: 999, fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', background: item.stage === 'review' ? 'rgba(255,165,0,0.15)' : item.stage === 'published' ? 'rgba(34,197,94,0.15)' : 'var(--ui-bg-tertiary)', color: item.stage === 'review' ? '#cc8800' : item.stage === 'published' ? '#16a34a' : 'var(--ui-text-secondary)', border: '1px solid ' + (item.stage === 'review' ? 'rgba(255,165,0,0.3)' : item.stage === 'published' ? 'rgba(34,197,94,0.3)' : 'var(--ui-stroke-tertiary)') } }, item.stage || 'draft'))
 
   let content
-  if (view === 'App settings') content = h(Fragment, null, h('section', { style: panel }, h('h2', null, 'Service connection'), input('Local service URL', base, setBase), input('Bearer token (stored locally; masked)', token, setToken), button(connected ? 'Reconnect' : 'Connect', connect), button('Import legacy plugin data', importLegacy, !connected), h('p', { role: 'status' }, connected ? `Connected · revision ${workspace?.revision}` : 'Disconnected. Configure the local service and token to load records.'), h('p', null, 'Token is excluded from export and sent only as the Authorization header to this configured service.')), h('section', { style: panel }, h('h2', null, `${selectedApp} app profile`), h('p', null, 'Service owned profile. Enter sourced brand, CTA, claim, rights, event, and privacy records as JSON; saving does not attest approval.'), input(`${selectedApp} profile JSON`, profileText || JSON.stringify(workspace?.profiles?.find(p => p.name === selectedApp) || { appId: selectedApp.toLowerCase(), name: selectedApp, brandPromise: '', claims: [], rights: 'unknown', events: [], privacy: 'unconfigured' }, null, 2), setProfileText, true), button('Save profile with revision check', async () => { try { const profile = JSON.parse(profileText); const out = await api(`/api/profiles/${encodeURIComponent(selectedApp)}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: workspace.revision, profile }) }); setNotice(`Profile saved at service revision ${out.revision}.`); await reload() } catch (e) { setError(e.message) } }, !connected || !profileText)))
+  if (view === 'App settings') content = h(Fragment, null, h('section', { style: panel }, h('h2', null, nativeBackend ? 'Hermes backend connection' : 'Service connection'), ...(nativeBackend ? [h('p', { key: 'native' }, 'Uses this Hermes connection and its profile-scoped backend. No service URL or bearer token is needed.')] : [input('Local service URL', base, setBase), input('Bearer token (stored locally; masked)', token, setToken)]), button(connected ? 'Reconnect' : 'Connect', connect), button('Import legacy plugin data', importLegacy, !connected), h('p', { role: 'status' }, connected ? `Connected · revision ${workspace?.revision}` : (nativeBackend ? 'Disconnected. Enable the marketing backend on this Hermes connection, then retry.' : 'Disconnected. Configure the local service and token to load records.')), h('p', null, nativeBackend ? 'Workspace and ledger are persisted on the connected Hermes host. Agents and renderer availability are separate capabilities.' : 'Token is excluded from export and sent only as the Authorization header to this configured service.')), h('section', { style: panel }, h('h2', null, `${selectedApp} app profile`), h('p', null, 'Service owned profile. Enter sourced brand, CTA, claim, rights, event, and privacy records as JSON; saving does not attest approval.'), input(`${selectedApp} profile JSON`, profileText || JSON.stringify(workspace?.profiles?.find(p => p.name === selectedApp) || { appId: selectedApp.toLowerCase(), name: selectedApp, brandPromise: '', claims: [], rights: 'unknown', events: [], privacy: 'unconfigured' }, null, 2), setProfileText, true), button('Save profile with revision check', async () => { try { const profile = JSON.parse(profileText); const out = await api(`/api/profiles/${encodeURIComponent(selectedApp)}`, { method: 'PUT', body: JSON.stringify({ expectedRevision: workspace.revision, profile }) }); setNotice(`Profile saved at service revision ${out.revision}.`); await reload() } catch (e) { setError(e.message) } }, !connected || !profileText)))
   else if (view === 'System health') content = h(Fragment, null, h(SystemHealth, { snapshot: health, metrics: health?.jobs ? { 'Queued jobs': health.jobs.queued, 'Running jobs': health.jobs.running, 'Failed jobs': health.jobs.failed } : {}, onRetry: refreshHealth }), ...(jobs.length ? jobs.map(item => h(JobDetail, { key: item.id, job: item, onRetry: id => item.status === 'failed' && api(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' }).then(refreshHealth).catch(e => setError(e.message)) })) : [h(JobDetail, { key: 'empty', job: null })]))
   else if (view === 'Experiments') content = h('section', { style: panel }, h('h2', null, 'Experiment recommendation'), input('Experiment policy and version (JSON)', experimentText, setExperimentText, true), input('Observations (JSON)', observationText, setObservationText, true), button('Recommend decision', async () => { try { const out = await api('/api/experiments/recommend', { method: 'POST', body: JSON.stringify({ draftId: draft?.id, revision: workspace?.revision, experiment: JSON.parse(experimentText), observations: JSON.parse(observationText) }) }); setNotice(`Recommendation: ${out.decision?.status || out.status || 'inconclusive'} · ${out.decision?.rationale || 'No configured policy or sufficient evidence.'}`); await reload() } catch (e) { setError(e.message) } }, !connected), h('p', null, 'No decision is inferred without service-validated policy and observations.'))
   else if (view === 'Slideshows' && draft) content = h(Fragment, null,

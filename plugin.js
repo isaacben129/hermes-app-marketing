@@ -231,7 +231,18 @@ function MarketingPage({ ctx }) {
   const [observationText, setObservationText] = useState("[]");
   const generation = React3.useRef(0);
   const headers = () => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
+  const nativeBackend = typeof ctx.rest === "function";
   const api = async (path, init = {}) => {
+    if (nativeBackend) {
+      try {
+        const { body, headers: _headers, ...options } = init;
+        const data = await ctx.rest(path.replace(/^\/api(?=\/)/, ""), { ...options, ...body !== void 0 ? { body: typeof body === "string" ? JSON.parse(body) : body } : {}, timeoutMs: 125e3 });
+        if (data?.error) throw Object.assign(new Error(data.error.message || data.error.code || "Marketing backend request failed."), data.error);
+        return data;
+      } catch (error2) {
+        throw new Error(`Hermes backend: ${error2.message || "unavailable"}. If disabled, enable App Marketing on this connection and retry.`);
+      }
+    }
     const origin = localServiceOrigin(base);
     return json(await fetch(`${origin}${path}`, { ...init, headers: { ...headers(), ...init.headers || {} } }));
   };
@@ -242,12 +253,13 @@ function MarketingPage({ ctx }) {
     setWorkspace(null);
     const request = ++generation.current;
     try {
-      const origin = localServiceOrigin(base);
-      const health2 = await json(await fetch(`${origin}/api/health`));
+      const health2 = await api("/api/health");
       if (request !== generation.current) return;
       if (!health2) throw new Error("Service health response was empty.");
-      ctx.storage.set("serviceUrl", base);
-      ctx.storage.set("serviceToken", token);
+      if (!nativeBackend) {
+        ctx.storage.set("serviceUrl", base);
+        ctx.storage.set("serviceToken", token);
+      }
       const data = await api(`/api/workspace?app=${encodeURIComponent(selectedApp)}`);
       if (request !== generation.current) return;
       setHealth(health2);
@@ -261,7 +273,10 @@ function MarketingPage({ ctx }) {
     }
   };
   useEffect(() => {
-    if (ctx.storage.get("serviceUrl") && ctx.storage.get("serviceToken")) connect();
+    if (nativeBackend || ctx.storage.get("serviceUrl") && ctx.storage.get("serviceToken")) connect();
+    return () => {
+      generation.current++;
+    };
   }, []);
   const reload = async () => {
     const req = ++generation.current;
@@ -564,7 +579,7 @@ function MarketingPage({ ctx }) {
     }
   }, h3("div", null, h3("div", { style: { fontWeight: 500, fontSize: "0.95rem" } }, item.title || item.id), h3("div", { style: { fontSize: "0.8rem", color: "var(--ui-text-tertiary)" } }, `Revision ${item.revision || workspace?.revision || "\u2014"} \xB7 ${item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : "No date"}`)), h3("span", { style: { padding: "3px 8px", borderRadius: 999, fontSize: "0.65rem", fontWeight: 600, textTransform: "uppercase", background: item.stage === "review" ? "rgba(255,165,0,0.15)" : item.stage === "published" ? "rgba(34,197,94,0.15)" : "var(--ui-bg-tertiary)", color: item.stage === "review" ? "#cc8800" : item.stage === "published" ? "#16a34a" : "var(--ui-text-secondary)", border: "1px solid " + (item.stage === "review" ? "rgba(255,165,0,0.3)" : item.stage === "published" ? "rgba(34,197,94,0.3)" : "var(--ui-stroke-tertiary)") } }, item.stage || "draft"));
   let content;
-  if (view === "App settings") content = h3(Fragment, null, h3("section", { style: panel3 }, h3("h2", null, "Service connection"), input("Local service URL", base, setBase), input("Bearer token (stored locally; masked)", token, setToken), button(connected ? "Reconnect" : "Connect", connect), button("Import legacy plugin data", importLegacy, !connected), h3("p", { role: "status" }, connected ? `Connected \xB7 revision ${workspace?.revision}` : "Disconnected. Configure the local service and token to load records."), h3("p", null, "Token is excluded from export and sent only as the Authorization header to this configured service.")), h3("section", { style: panel3 }, h3("h2", null, `${selectedApp} app profile`), h3("p", null, "Service owned profile. Enter sourced brand, CTA, claim, rights, event, and privacy records as JSON; saving does not attest approval."), input(`${selectedApp} profile JSON`, profileText || JSON.stringify(workspace?.profiles?.find((p) => p.name === selectedApp) || { appId: selectedApp.toLowerCase(), name: selectedApp, brandPromise: "", claims: [], rights: "unknown", events: [], privacy: "unconfigured" }, null, 2), setProfileText, true), button("Save profile with revision check", async () => {
+  if (view === "App settings") content = h3(Fragment, null, h3("section", { style: panel3 }, h3("h2", null, nativeBackend ? "Hermes backend connection" : "Service connection"), ...nativeBackend ? [h3("p", { key: "native" }, "Uses this Hermes connection and its profile-scoped backend. No service URL or bearer token is needed.")] : [input("Local service URL", base, setBase), input("Bearer token (stored locally; masked)", token, setToken)], button(connected ? "Reconnect" : "Connect", connect), button("Import legacy plugin data", importLegacy, !connected), h3("p", { role: "status" }, connected ? `Connected \xB7 revision ${workspace?.revision}` : nativeBackend ? "Disconnected. Enable the marketing backend on this Hermes connection, then retry." : "Disconnected. Configure the local service and token to load records."), h3("p", null, nativeBackend ? "Workspace and ledger are persisted on the connected Hermes host. Agents and renderer availability are separate capabilities." : "Token is excluded from export and sent only as the Authorization header to this configured service.")), h3("section", { style: panel3 }, h3("h2", null, `${selectedApp} app profile`), h3("p", null, "Service owned profile. Enter sourced brand, CTA, claim, rights, event, and privacy records as JSON; saving does not attest approval."), input(`${selectedApp} profile JSON`, profileText || JSON.stringify(workspace?.profiles?.find((p) => p.name === selectedApp) || { appId: selectedApp.toLowerCase(), name: selectedApp, brandPromise: "", claims: [], rights: "unknown", events: [], privacy: "unconfigured" }, null, 2), setProfileText, true), button("Save profile with revision check", async () => {
     try {
       const profile = JSON.parse(profileText);
       const out = await api(`/api/profiles/${encodeURIComponent(selectedApp)}`, { method: "PUT", body: JSON.stringify({ expectedRevision: workspace.revision, profile }) });
