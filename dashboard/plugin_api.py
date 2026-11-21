@@ -125,12 +125,16 @@ async def read_agent_run(run_id: str):
 
 @router.get("/creative-previews")
 async def read_creative_previews(app: str = "Cherry"):
-    return await creatives_endpoint(app)
+    try: directory = data_dir()
+    except ValueError: return JSONResponse({"error": {"code": "invalid_input", "message": "Invalid backend data directory."}}, status_code=400)
+    return await creatives_endpoint(directory, app)
 
 
 @router.get("/creative-previews/{run_id}/{package_id}/slides/{slide_index}")
 async def read_creative_slide(run_id: str, package_id: str, slide_index: int):
-    return read_slide(run_id, package_id, slide_index)
+    try: directory = data_dir()
+    except ValueError: return JSONResponse({"error": {"code": "invalid_input", "message": "Invalid backend data directory."}}, status_code=400)
+    return read_slide(directory, run_id, package_id, slide_index)
 
 
 @router.api_route("/{path:path}", methods=["GET", "PUT", "POST", "DELETE"])

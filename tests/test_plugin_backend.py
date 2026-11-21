@@ -150,6 +150,46 @@ class PluginBackendTest(unittest.TestCase):
             self.assertEqual(detail.json()['stage'], 'package-1-initial-author')
             self.assertEqual(detail.json()['completedCount'], 0)
 
+    def test_saved_creative_gallery_route_is_mounted_on_production_router(self):
+        import hashlib, io, json
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {'HERMES_MARKETING_DATA_DIR': home}):
+            run_id, package = 'a' * 32, 'pkg-safe_1'
+            artifact = Path(home) / 'agent-runs' / run_id / package / 'iteration-2'
+            (artifact / 'rendered').mkdir(parents=True)
+            rendered = []
+            for index in range(1, 3):
+                buf = io.BytesIO(); Image.new('RGB', (20, 30), (index * 20, 40, 60)).save(buf, 'PNG')
+                data = buf.getvalue(); name = f'slide-{index:02}.png'
+                (artifact / 'rendered' / name).write_bytes(data)
+                rendered.append({'index': index, 'file': f'rendered/{name}', 'sha256': hashlib.sha256(data).hexdigest()})
+            (artifact / 'final.json').write_text(json.dumps({'title': 'Saved sample', 'slides': [{}, {}]}))
+            (artifact / 'final-critique.json').write_text(json.dumps({'reviews': [], 'hardBlockers': ['rights pending']}))
+            (artifact / 'provenance.json').write_text(json.dumps({'rendered': rendered}))
+            run = {'runId': run_id, 'app': 'Cherry', 'count': 5, 'status': 'succeeded', 'results': [{'packageId': package, 'artifactPath': f'{package}/iteration-2', 'draftId': 'draft-saved-1', 'status': 'unapproved'}]}
+            (Path(home) / 'agent-runs' / run_id / 'run.json').write_text(json.dumps(run))
+            import types, sys
+            hermes_constants = types.SimpleNamespace(get_hermes_home=lambda: Path(home))
+            with patch.dict(sys.modules, {'hermes_constants': hermes_constants}):
+                response = self.load_client().get('/api/plugins/marketing-system/creative-previews?app=Cherry')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['creatives'][0]['slideCount'], 2)
+            slide = self.load_client().get(f'/api/plugins/marketing-system/creative-previews/{run_id}/{package}/slides/1')
+            self.assertEqual(slide.status_code, 200, slide.text)
+            other_profile = Path(home) / 'different-profile'; other_profile.mkdir()
+            with patch.dict(os.environ, {'HERMES_MARKETING_DATA_DIR': str(other_profile)}):
+                isolated = self.load_client().get('/api/plugins/marketing-system/creative-previews?app=Cherry')
+                self.assertEqual(isolated.status_code, 200)
+                self.assertEqual(isolated.json(), {'creatives': []})
+            provenance = artifact / 'provenance.json'
+            saved = json.loads(provenance.read_text()); saved['rendered'][1]['sha256'] = '0' * 64
+            provenance.write_text(json.dumps(saved))
+            tampered = self.load_client().get('/api/plugins/marketing-system/creative-previews?app=Cherry')
+            self.assertEqual(tampered.status_code, 200)
+            self.assertEqual(tampered.json(), {'creatives': []})
+            unavailable = self.load_client().get(f'/api/plugins/marketing-system/creative-previews/{run_id}/{package}/slides/1')
+            self.assertEqual(unavailable.status_code, 404)
+
 
 if __name__ == '__main__':
     unittest.main()

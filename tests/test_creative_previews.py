@@ -1,40 +1,44 @@
-import hashlib, json, tempfile, unittest
+import hashlib, io, json, tempfile, unittest
 from pathlib import Path
-from unittest.mock import patch
+from PIL import Image
 from dashboard import creative_previews as cp
-
-PNG = b'\x89PNG\r\n\x1a\nfixture'
 
 class CreativePreviewTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
-        self.data = Path(self.tmp.name); self.run='a'*32; self.pkg=self.run+'-01'
+        self.data = Path(self.tmp.name); self.run='a'*32; self.pkg='pkg-safe_1'
         self.root=self.data/'agent-runs'/self.run; self.art=self.root/self.pkg/'iteration-2'
         (self.art/'rendered').mkdir(parents=True)
-        record={'runId':self.run,'app':'Cherry','results':[{'packageId':self.pkg,'draftId':self.pkg,'status':'rendered-unapproved','artifactPath':self.pkg+'/iteration-2','qualityReviews':[{'dimension':'hook','score':4}]}]}
+        rendered=[]
+        for index in (1, 2):
+            buffer=io.BytesIO(); Image.new('RGB',(24,36),(index*20,40,60)).save(buffer,'PNG'); data=buffer.getvalue()
+            name=f'slide-{index:02}.png'; (self.art/'rendered'/name).write_bytes(data)
+            rendered.append({'index':index,'file':f'rendered/{name}','sha256':hashlib.sha256(data).hexdigest()})
+        record={'runId':self.run,'app':'Cherry','results':[{'packageId':self.pkg,'draftId':'saved-draft-1','status':'unapproved','artifactPath':self.pkg+'/iteration-2'}]}
         (self.root/'run.json').write_text(json.dumps(record))
-        for name,value in [('final.json',{'title':'Fixture title'}),('final-critique.json',{'hardBlockers':['rights']}),('provenance.json',{'fixture':True})]: (self.art/name).write_text(json.dumps(value))
-        (self.art/'rendered/slide-01.png').write_bytes(PNG)
-        self.patch=patch.object(cp,'data_dir',return_value=self.data); self.patch.start(); self.addCleanup(self.patch.stop)
+        for name,value in [('final.json',{'title':'Fixture title','slides':[{},{}]}),('final-critique.json',{'reviews':[{'dimension':'hook clarity','score':4}],'hardBlockers':['rights']}),('provenance.json',{'rendered':rendered})]: (self.art/name).write_text(json.dumps(value))
 
-    def test_lists_latest_saved_and_returns_verified_image(self):
-        result=cp.list_creatives()['creatives'][0]
-        self.assertEqual((result['title'],result['iteration'],result['status']),('Fixture title','iteration-2','rendered-unapproved'))
-        image=cp.read_slide(self.run,self.pkg,0)
-        self.assertEqual(image['sha256'],hashlib.sha256(PNG).hexdigest())
-        self.assertEqual(__import__('base64').b64decode(image['dataUrl'].split(',',1)[1]), PNG)
+    def test_lists_saved_and_returns_provenance_verified_real_png(self):
+        result=cp.list_creatives(self.data)['creatives'][0]
+        self.assertEqual((result['title'],result['iteration'],result['slideCount']),('Fixture title','iteration-2',2))
+        image=cp.read_slide(self.data,self.run,self.pkg,1)
+        data=__import__('base64').b64decode(image['dataUrl'].split(',',1)[1])
+        self.assertEqual(hashlib.sha256(data).hexdigest(),image['sha256'])
+        with Image.open(io.BytesIO(data)) as decoded: self.assertEqual(decoded.size,(24,36))
 
-    def test_other_app_and_bad_paths_are_isolated(self):
-        self.assertEqual(cp.list_creatives('Other'),{'creatives':[]})
-        self.assertEqual(cp.read_slide('../'+self.run,self.pkg,0).status_code,404)
-        (self.art/'rendered/slide-01.png').unlink()
-        self.assertEqual(cp.list_creatives()['creatives'],[])
+    def test_tampered_digest_missing_png_and_malformed_provenance_are_unavailable(self):
+        provenance=self.art/'provenance.json'; body=json.loads(provenance.read_text()); body['rendered'][0]['sha256']='0'*64; provenance.write_text(json.dumps(body))
+        self.assertEqual(cp.list_creatives(self.data)['creatives'],[])
+        self.assertEqual(cp.read_slide(self.data,self.run,self.pkg,0).status_code,404)
+        body['rendered'][0]['sha256']='bad'; provenance.write_text(json.dumps(body))
+        self.assertEqual(cp.list_creatives(self.data)['creatives'],[])
 
-    def test_symlinked_package_escape_is_not_listed(self):
+    def test_app_run_id_and_symlinked_package_are_isolated(self):
+        self.assertEqual(cp.list_creatives(self.data,'Other'),{'creatives':[]})
+        self.assertEqual(cp.read_slide(self.data,'../'+self.run,self.pkg,0).status_code,404)
         outside=Path(self.tmp.name)/'outside'; outside.mkdir()
-        link=self.root/self.pkg
         import shutil
-        shutil.rmtree(link); link.symlink_to(outside, target_is_directory=True)
-        self.assertEqual(cp.list_creatives()['creatives'],[])
+        link=self.root/self.pkg; shutil.rmtree(link); link.symlink_to(outside,target_is_directory=True)
+        self.assertEqual(cp.list_creatives(self.data)['creatives'],[])
 
 if __name__ == '__main__': unittest.main()

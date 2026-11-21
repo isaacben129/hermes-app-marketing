@@ -5,6 +5,17 @@ import { loadPlugin } from './helpers/load-plugin.mjs'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
+test('registered native page exposes the saved Creatives gallery navigation', async t => {
+  const loaded = await loadPlugin(); t.after(loaded.cleanup)
+  const contributions = []
+  loaded.default.register({ register: x => contributions.push(x), storage: { get: (_k, f) => f, set() {} }, rest: async () => ({ version: 1, drafts: [], profiles: [] }) })
+  let renderer
+  await act(async () => { renderer = TestRenderer.create(contributions.find(x => x.id === 'page').render()) })
+  t.after(() => act(() => renderer.unmount()))
+  const content = JSON.stringify(renderer.toJSON())
+  assert.match(content, /Creatives/)
+})
+
 test('native Desktop connects through ctx.rest automatically without URL or token storage', async t => {
   const loaded = await loadPlugin(); t.after(loaded.cleanup)
   const contributions = []; const calls = []

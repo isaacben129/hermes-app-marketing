@@ -190,13 +190,15 @@ import React3, { useEffect, useState } from "react";
 var h3 = React3.createElement;
 function CreativeCover({ api, item }) {
   const [src, setSrc] = useState("");
-  const [node, setNode] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const node = React3.useRef(null);
   useEffect(() => {
-    if (!node) return;
+    if (!node.current) return;
     let live = true;
     const load = () => api(`/creative-previews/${encodeURIComponent(item.runId)}/${encodeURIComponent(item.id)}/slides/0`).then((x) => {
       if (live) setSrc(x.dataUrl);
     }).catch(() => {
+      if (live) setFailed(true);
     });
     if (typeof IntersectionObserver === "undefined") {
       load();
@@ -210,15 +212,15 @@ function CreativeCover({ api, item }) {
         load();
       }
     });
-    observer.observe(node);
+    observer.observe(node.current);
     return () => {
       live = false;
       observer.disconnect();
     };
-  }, [node, item.id, item.runId]);
-  return src ? h3("img", { ref: setNode, alt: "", loading: "lazy", src, style: { width: "100%", maxHeight: 180, objectFit: "contain" } }) : h3("span", { ref: setNode, role: "status" }, "Saved cover preview");
+  }, [item.id, item.runId]);
+  return h3("span", { ref: node, role: failed ? "img" : "status", "aria-label": failed ? "Saved cover unavailable" : void 0 }, src ? h3("img", { alt: "", loading: "lazy", src, style: { width: "100%", maxHeight: 180, objectFit: "contain" } }) : failed ? "Saved cover unavailable" : "Saved cover preview");
 }
-function CreativeGallery({ api, openDraft }) {
+function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
   const [slide, setSlide] = useState(0);
@@ -227,7 +229,7 @@ function CreativeGallery({ api, openDraft }) {
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     let live = true;
-    api("/creative-previews?app=Cherry").then((x) => {
+    api(`/creative-previews?app=${encodeURIComponent(selectedApp)}`).then((x) => {
       if (live) setItems(x.creatives || []);
     }).catch((e) => {
       if (live) setError(e.message || "Creative gallery unavailable.");
@@ -237,9 +239,10 @@ function CreativeGallery({ api, openDraft }) {
     return () => {
       live = false;
     };
-  }, []);
+  }, [selectedApp]);
   useEffect(() => {
     let live = true;
+    setError("");
     setImage(null);
     if (selected) api(`/creative-previews/${encodeURIComponent(selected.runId)}/${encodeURIComponent(selected.id)}/slides/${slide}`).then((x) => {
       if (live) setImage(x.dataUrl);
@@ -252,7 +255,7 @@ function CreativeGallery({ api, openDraft }) {
   }, [selected, slide]);
   const panel4 = { border: "1px solid var(--ui-stroke-secondary)", borderRadius: 6, padding: 14, display: "grid", gap: 10 };
   if (loading) return h3("section", { role: "status" }, "Loading generated creatives\u2026");
-  if (error) return h3("section", { role: "alert" }, `Generated creatives are unavailable: ${error}`);
+  if (error && !selected) return h3("section", { style: panel4 }, h3("h2", null, "Generated creatives"), h3("p", { role: "alert" }, `Generated creatives are unavailable: ${error}`));
   if (!items.length) return h3("section", { style: panel4 }, h3("h2", null, "Generated creatives"), h3("p", null, "No saved rendered Cherry creatives are available for this profile."));
   if (!selected) return h3(
     "section",
@@ -286,15 +289,15 @@ function CreativeGallery({ api, openDraft }) {
       { style: panel4 },
       h3("h3", null, selected.title),
       h3("span", { role: "status" }, `Unapproved \xB7 ${selected.status} \xB7 ${selected.iteration}`),
-      image ? h3("img", { alt: `${selected.title}, slide ${slide + 1}`, src: image, style: { maxHeight: "65vh", maxWidth: "100%", objectFit: "contain", justifySelf: "center" } }) : h3("span", { role: "status" }, "Loading rendered slide\u2026"),
+      image ? h3("img", { alt: `${selected.title}, slide ${slide + 1}`, src: image, style: { maxHeight: "65vh", maxWidth: "100%", objectFit: "contain", justifySelf: "center" } }) : error ? h3("p", { role: "alert" }, `Rendered slide unavailable: ${error}`) : h3("span", { role: "status" }, "Loading rendered slide\u2026"),
       h3("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, ...buttons, h3("button", { onClick: () => setSlide(Math.max(0, slide - 1)), disabled: slide === 0 }, "Previous"), h3("button", { onClick: () => setSlide(Math.min(selected.slideCount - 1, slide + 1)), disabled: slide >= selected.slideCount - 1 }, "Next")),
       h3("h4", null, "Critique scores"),
       h3("ul", null, ...reviews),
       ...blockers,
       h3("button", { onClick: async () => {
         try {
-          const workspace = await api("/api/workspace?app=Cherry");
-          const draft = workspace.drafts?.find((item) => item.id === selected.draftId);
+          const workspace = await api(`/api/workspace?app=${encodeURIComponent(selectedApp)}`);
+          const draft = workspace.drafts?.find((item) => item.id === selected.draftId && item.app === selectedApp);
           if (!draft) throw new Error("No saved editable draft is linked to this generated result.");
           openDraft(draft);
         } catch (e) {
@@ -798,7 +801,7 @@ function MarketingPage({ ctx }) {
     }
   }, h4("div", null, h4("div", { style: { fontWeight: 500, fontSize: "0.95rem" } }, item.title || item.id), h4("div", { style: { fontSize: "0.8rem", color: "var(--ui-text-tertiary)" } }, `Revision ${item.revision || workspace?.revision || "\u2014"} \xB7 ${item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : "No date"}`)), h4("span", { style: { padding: "3px 8px", borderRadius: 999, fontSize: "0.65rem", fontWeight: 600, textTransform: "uppercase", background: item.stage === "review" ? "rgba(255,165,0,0.15)" : item.stage === "published" ? "rgba(34,197,94,0.15)" : "var(--ui-bg-tertiary)", color: item.stage === "review" ? "#cc8800" : item.stage === "published" ? "#16a34a" : "var(--ui-text-secondary)", border: "1px solid " + (item.stage === "review" ? "rgba(255,165,0,0.3)" : item.stage === "published" ? "rgba(34,197,94,0.3)" : "var(--ui-stroke-tertiary)") } }, item.stage || "draft"));
   let content;
-  if (view === "Creatives") content = h4(CreativeGallery, { api, openDraft });
+  if (view === "Creatives") content = h4(CreativeGallery, { key: selectedApp, api, selectedApp, openDraft });
   else if (view === "App settings") content = h4(Fragment, null, h4("section", { style: panel3 }, h4("h2", null, nativeBackend ? "Hermes backend connection" : "Service connection"), ...nativeBackend ? [h4("p", { key: "native" }, "Uses this Hermes connection and its profile-scoped backend. No service URL or bearer token is needed.")] : [input("Local service URL", base, setBase), input("Bearer token (stored locally; masked)", token, setToken)], button(connected ? "Reconnect" : "Connect", connect), button("Import legacy plugin data", importLegacy, !connected), h4("p", { role: "status" }, connected ? `Connected \xB7 revision ${workspace?.revision}` : nativeBackend ? "Disconnected. Enable the marketing backend on this Hermes connection, then retry." : "Disconnected. Configure the local service and token to load records."), h4("p", null, nativeBackend ? "Workspace and ledger are persisted on the connected Hermes host. Agents and renderer availability are separate capabilities." : "Token is excluded from export and sent only as the Authorization header to this configured service.")), h4("section", { style: panel3 }, h4("h2", null, `${selectedApp} app profile`), h4("p", null, "Service owned profile. Enter sourced brand, CTA, claim, rights, event, and privacy records as JSON; saving does not attest approval."), input(`${selectedApp} profile JSON`, profileText || JSON.stringify(workspace?.profiles?.find((p) => p.name === selectedApp) || { appId: selectedApp.toLowerCase(), name: selectedApp, brandPromise: "", claims: [], rights: "unknown", events: [], privacy: "unconfigured" }, null, 2), setProfileText, true), button("Save profile with revision check", async () => {
     try {
       const profile = JSON.parse(profileText);

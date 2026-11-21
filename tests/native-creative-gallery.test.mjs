@@ -5,6 +5,7 @@ import { loadPlugin } from './helpers/load-plugin.mjs'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const textOf = node => node.children.map(child => typeof child === 'string' ? child : textOf(child)).join('')
+const onePixelPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGOoCNAAAAI0APHlrLKsAAAAAElFTkSuQmCC'
 
 test('native gallery browses saved PNG slides, critique and existing draft editor', async t => {
   const loaded = await loadPlugin(); t.after(loaded.cleanup)
@@ -16,8 +17,8 @@ test('native gallery browses saved PNG slides, critique and existing draft edito
     if(path.startsWith('/workspace?')) return {revision:1,drafts:[{id:'draft-1',app:'Cherry',title:'Rendered fixture',slides:[],qualityReviews:[]}],profiles:[]}
     if(path==='/agent-runs') return {runs:[]}
     if(path==='/creative-previews?app=Cherry') return {creatives:[creative]}
-    if(path.endsWith('/slides/0')) return {dataUrl:'data:image/png;base64,c2xpZGUw',sha256:'a',index:0,draftId:'draft-1'}
-    if(path.endsWith('/slides/1')) return {dataUrl:'data:image/png;base64,c2xpZGUx',sha256:'b',index:1,draftId:'draft-1'}
+    if(path.endsWith('/slides/0')) return {dataUrl:onePixelPng,sha256:'a',index:0,draftId:'draft-1'}
+    if(path.endsWith('/slides/1')) return {dataUrl:onePixelPng,sha256:'b',index:1,draftId:'draft-1'}
     throw new Error('unexpected '+path)
   } }
   loaded.default.register(ctx)
