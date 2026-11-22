@@ -100,3 +100,35 @@ test('gallery ignores late slide responses and offers recovery while retaining t
   assert.match(JSON.stringify(renderer.toJSON()),/slide 3/,'status identifies the displayed slide')
   assert.ok(renderer.root.findAllByType('button').some(button=>textOf(button).includes('Retry')),'retry recovery is available')
 })
+
+test('failed next slide keeps retry inside the reserved stage and retry recovers without stale decode overwrites', async t => {
+  const loaded=await loadPlugin();t.after(loaded.cleanup);const contributions=[],pending={}
+  const creatives=[{id:'one',runId:'r',title:'First work',status:'rendered-unapproved',slideCount:2,slides:[{},{}]},{id:'two',runId:'r',title:'Other work',status:'rendered-unapproved',slideCount:1,slides:[{}]}]
+  const ctx={register:x=>contributions.push(x),storage:{get:(_k,f)=>f,set(){}},rest:async path=>{
+    if(path==='/health')return{version:1};if(path.startsWith('/workspace?'))return{revision:1,drafts:[],profiles:[]};if(path==='/agent-runs')return{runs:[]};if(path==='/creative-previews?app=Cherry')return{creatives}
+    const [, ,run,id,,n]=path.split('/');if(n==='0'&&id==='one')return{dataUrl:'data:image/png;base64,shown',index:0};if(n==='0'&&id==='two')return{dataUrl:'data:image/png;base64,other',index:0}
+    return new Promise((resolve,reject)=>{(pending[id+n]||=[]).push({resolve,reject})})
+  }}
+  loaded.default.register(ctx);let renderer
+  await act(async()=>{renderer=TestRenderer.create(contributions.find(x=>x.id==='page').render());await new Promise(r=>setTimeout(r,10))});t.after(()=>act(()=>renderer.unmount()))
+  const click=async label=>{const b=renderer.root.findAllByType('button').find(x=>x.props['aria-label']===label||textOf(x).includes(label));assert.ok(b,label);await act(async()=>{b.props.onClick();await new Promise(r=>setTimeout(r,0))})}
+  await click('Creatives');await click('First work');await click('Show slide 2')
+  await act(async()=>{pending.one1[0].reject(new Error('renderer says image missing'));await new Promise(r=>setTimeout(r,0))})
+  assert.equal(renderer.root.findByType('img').props.src,'data:image/png;base64,shown')
+  const stage=renderer.root.findAll(x=>x.props['aria-label']==='Portrait slide stage')[0]
+  const overlay=stage.findAll(x=>x.props.role==='alert')[0]
+  const retry=renderer.root.findAllByType('button').find(x=>textOf(x).includes('Retry slide'))
+  const tree=renderer.toJSON();const findStage=node=>node?.props?.['aria-label']==='Portrait slide stage'?node:(node?.children||[]).map(findStage).find(Boolean)
+  assert.ok(retry);assert.match(JSON.stringify(findStage(tree)),/Retry slide/,'retry must be within the fixed stage overlay')
+  assert.match(textOf(overlay),/renderer says image missing/)
+  await click('Retry slide');assert.ok(pending.one1.length===2)
+  await act(async()=>{pending.one1[1].resolve({dataUrl:'data:image/png;base64,recovered',index:1});await new Promise(r=>setTimeout(r,0))})
+  assert.equal(renderer.root.findByType('img').props.src,'data:image/png;base64,recovered');assert.doesNotMatch(textOf(stage),/unavailable/)
+  const original=globalThis.Image;let finish
+  globalThis.Image=class{set src(v){this.value=v}decode(){return this.value.includes('other')?new Promise(resolve=>finish=resolve):Promise.resolve()}}
+  t.after(()=>{if(original===undefined)delete globalThis.Image;else globalThis.Image=original})
+  await click('Back to creatives');await click('Other work')
+  await click('Back to creatives');await click('First work')
+  await act(async()=>{finish();await new Promise(r=>setTimeout(r,0))})
+  assert.equal(renderer.root.findByType('img').props.src,'data:image/png;base64,shown','late decoded image cannot replace the currently selected creative')
+})

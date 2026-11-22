@@ -5,6 +5,11 @@ const iterationLabel = value => {
   const match = typeof value === 'string' && /^iteration-([0-9]+)$/.exec(value)
   return match ? `Revision ${match[1]}` : 'Original'
 }
+const safeError = (error, fallback) => {
+  const message = typeof error?.message === 'string' ? error.message.trim() : ''
+  if (!message || /(?:authorization|bearer\s|api[_ -]?key|token|secret|password|\/home\/|\/Users\/|\\\\)/i.test(message)) return fallback
+  return message.slice(0, 240)
+}
 function CreativeCover({ api, item }) {
   const [src, setSrc] = useState('')
   const [failed, setFailed] = useState(false)
@@ -54,7 +59,7 @@ export default function CreativeGallery({ api, openDraft, selectedApp = 'Cherry'
         }
         if (live && request === requestId.current) setDisplayed({ creativeKey, index: slide, src: result.dataUrl })
       })
-      .catch(e => { if (live && request === requestId.current) setError(e.message || 'Rendered slide unavailable.') })
+      .catch(e => { if (live && request === requestId.current) setError(safeError(e, 'Rendered slide unavailable.')) })
     return () => { live = false }
   }, [selected, slide, retry])
   const panel = { border: '1px solid var(--ui-stroke-secondary)', borderRadius: 6, padding: 14, display: 'grid', gap: 10 }
@@ -76,9 +81,8 @@ export default function CreativeGallery({ api, openDraft, selectedApp = 'Cherry'
     h('article', { style: panel }, h('h3', null, selected.title), h('span', { role: 'status' }, `Unapproved · ${selected.status} · ${iterationLabel(selected.iteration)}`),
       h('div', { 'aria-label': 'Portrait slide stage', style: { position: 'relative', width: 'min(100%, calc(65vh * 9 / 16))', aspectRatio: '9 / 16', maxHeight: '65vh', margin: 'auto', overflow: 'hidden', background: 'var(--ui-bg-secondary)', display: 'grid', placeItems: 'center' } },
         shown && h('img', { alt: `${selected.title}, slide ${shown.index + 1}`, src: shown.src, style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' } }),
-        (error || shown?.index !== slide) && h('span', { role: error ? 'alert' : 'status', style: { position: 'absolute', zIndex: 1, left: 8, right: 8, bottom: 8, padding: 8, background: 'rgba(0,0,0,.72)', color: 'white', textAlign: 'center' } }, error ? `Slide ${slide + 1} unavailable. ${shownLabel}` : `Loading slide ${slide + 1}. ${shownLabel}`),
+        (error || shown?.index !== slide) && h('div', { role: error ? 'alert' : 'status', style: { position: 'absolute', zIndex: 1, left: 8, right: 8, bottom: 8, padding: 8, background: 'rgba(0,0,0,.72)', color: 'white', textAlign: 'center' } }, error ? `Slide ${slide + 1} unavailable. ${error} ${shownLabel}` : `Loading slide ${slide + 1}. ${shownLabel}`, error && h('button', { onClick: () => { setError(''); setRetry(value => value + 1) } }, 'Retry slide')),
       ),
-      error && h('button', { onClick: () => { setError(''); setRetry(value => value + 1) } }, 'Retry slide'),
       h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, ...buttons, h('button', { onClick: () => setSlide(Math.max(0, slide - 1)), disabled: slide === 0 }, 'Previous'), h('button', { onClick: () => setSlide(Math.min(selected.slideCount - 1, slide + 1)), disabled: slide >= selected.slideCount - 1 }, 'Next')),
       h('h4', null, 'Critique scores'), h('ul', null, ...reviews), ...blockers,
       h('button', { onClick: async () => { try { const workspace = await api(`/api/workspace?app=${encodeURIComponent(selectedApp)}`); const draft = workspace.drafts?.find(item => item.id === selected.draftId && item.app === selectedApp); if (!draft) throw new Error('No saved editable draft is linked to this generated result.'); openDraft(draft) } catch (e) { setError(e.message || 'Saved draft is unavailable.') } } }, 'Edit draft'),

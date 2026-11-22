@@ -192,6 +192,11 @@ var iterationLabel = (value) => {
   const match = typeof value === "string" && /^iteration-([0-9]+)$/.exec(value);
   return match ? `Revision ${match[1]}` : "Original";
 };
+var safeError = (error, fallback) => {
+  const message = typeof error?.message === "string" ? error.message.trim() : "";
+  if (!message || /(?:authorization|bearer\s|api[_ -]?key|token|secret|password|\/home\/|\/Users\/|\\\\)/i.test(message)) return fallback;
+  return message.slice(0, 240);
+};
 function CreativeCover({ api, item }) {
   const [src, setSrc] = useState("");
   const [failed, setFailed] = useState(false);
@@ -268,7 +273,7 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
       }
       if (live && request === requestId.current) setDisplayed({ creativeKey: creativeKey2, index: slide, src: result.dataUrl });
     }).catch((e) => {
-      if (live && request === requestId.current) setError(e.message || "Rendered slide unavailable.");
+      if (live && request === requestId.current) setError(safeError(e, "Rendered slide unavailable."));
     });
     return () => {
       live = false;
@@ -318,12 +323,11 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
         "div",
         { "aria-label": "Portrait slide stage", style: { position: "relative", width: "min(100%, calc(65vh * 9 / 16))", aspectRatio: "9 / 16", maxHeight: "65vh", margin: "auto", overflow: "hidden", background: "var(--ui-bg-secondary)", display: "grid", placeItems: "center" } },
         shown && h3("img", { alt: `${selected.title}, slide ${shown.index + 1}`, src: shown.src, style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" } }),
-        (error || shown?.index !== slide) && h3("span", { role: error ? "alert" : "status", style: { position: "absolute", zIndex: 1, left: 8, right: 8, bottom: 8, padding: 8, background: "rgba(0,0,0,.72)", color: "white", textAlign: "center" } }, error ? `Slide ${slide + 1} unavailable. ${shownLabel}` : `Loading slide ${slide + 1}. ${shownLabel}`)
+        (error || shown?.index !== slide) && h3("div", { role: error ? "alert" : "status", style: { position: "absolute", zIndex: 1, left: 8, right: 8, bottom: 8, padding: 8, background: "rgba(0,0,0,.72)", color: "white", textAlign: "center" } }, error ? `Slide ${slide + 1} unavailable. ${error} ${shownLabel}` : `Loading slide ${slide + 1}. ${shownLabel}`, error && h3("button", { onClick: () => {
+          setError("");
+          setRetry((value) => value + 1);
+        } }, "Retry slide"))
       ),
-      error && h3("button", { onClick: () => {
-        setError("");
-        setRetry((value) => value + 1);
-      } }, "Retry slide"),
       h3("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, ...buttons, h3("button", { onClick: () => setSlide(Math.max(0, slide - 1)), disabled: slide === 0 }, "Previous"), h3("button", { onClick: () => setSlide(Math.min(selected.slideCount - 1, slide + 1)), disabled: slide >= selected.slideCount - 1 }, "Next")),
       h3("h4", null, "Critique scores"),
       h3("ul", null, ...reviews),
