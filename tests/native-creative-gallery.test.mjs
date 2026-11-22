@@ -35,3 +35,68 @@ test('native gallery browses saved PNG slides, critique and existing draft edito
   assert.match(JSON.stringify(renderer.toJSON()),/Rendered fixture/)
   assert.ok(calls.some(path=>path.startsWith('/creative-previews?app=Cherry')))
 })
+
+test('gallery keeps the displayed slide and portrait stage while a requested slide loads', async t => {
+  const loaded = await loadPlugin(); t.after(loaded.cleanup)
+  const contributions = []
+  let releaseSlide2
+  const slide2 = new Promise(resolve => { releaseSlide2 = resolve })
+  const creative = { id:'creative-1', draftId:'draft-1', runId:'run-1', title:'Portrait work', status:'rendered-unapproved', slideCount:2, slides:[{index:0},{index:1}] }
+  const ctx = { register:x=>contributions.push(x), storage:{get:(_k,f)=>f,set(){}}, rest:async path => {
+    if(path==='/health') return {version:1}
+    if(path.startsWith('/workspace?')) return {revision:1,drafts:[],profiles:[]}
+    if(path==='/agent-runs') return {runs:[]}
+    if(path==='/creative-previews?app=Cherry') return {creatives:[creative]}
+    if(path.endsWith('/slides/0')) return {dataUrl:'data:image/png;base64,first',index:0}
+    if(path.endsWith('/slides/1')) return slide2
+    throw new Error('unexpected '+path)
+  } }
+  loaded.default.register(ctx)
+  let renderer
+  await act(async()=>{renderer=TestRenderer.create(contributions.find(x=>x.id==='page').render());await new Promise(r=>setTimeout(r,10))})
+  t.after(()=>act(()=>renderer.unmount()))
+  const click=async label=>{const b=renderer.root.findAllByType('button').find(x=>x.props['aria-label']===label||textOf(x).includes(label));assert.ok(b,label);await act(async()=>{b.props.onClick();await new Promise(r=>setTimeout(r,0))})}
+  await click('Creatives'); await click('Portrait work')
+  const first=renderer.root.findByType('img')
+  assert.equal(first.props.src,'data:image/png;base64,first')
+  const stage=renderer.root.findAll(x=>x.props['aria-label']==='Portrait slide stage')[0]
+  assert.ok(stage,'fixed portrait stage is present')
+  const stageStyle=stage.props.style
+  const originalImage=globalThis.Image
+  let finishDecode
+  globalThis.Image=class { set src(value){this.value=value} decode(){return new Promise(resolve=>{finishDecode=resolve})} }
+  t.after(()=>{if(originalImage===undefined)delete globalThis.Image;else globalThis.Image=originalImage})
+  await click('Show slide 2')
+  assert.equal(renderer.root.findByType('img').props.src,'data:image/png;base64,first','old slide remains visible while next request is pending')
+  assert.deepEqual(renderer.root.findAll(x=>x.props['aria-label']==='Portrait slide stage')[0].props.style,stageStyle)
+  assert.match(JSON.stringify(renderer.toJSON()),/Loading slide 2/)
+  await act(async()=>{releaseSlide2({dataUrl:'data:image/png;base64,second',index:1});await new Promise(r=>setTimeout(r,0))})
+  assert.equal(renderer.root.findByType('img').props.src,'data:image/png;base64,first','old slide remains visible until replacement decode completes')
+  await act(async()=>{finishDecode();await new Promise(r=>setTimeout(r,0))})
+  assert.equal(renderer.root.findByType('img').props.src,'data:image/png;base64,second')
+})
+
+test('gallery ignores late slide responses and offers recovery while retaining the shown slide', async t => {
+  const loaded = await loadPlugin(); t.after(loaded.cleanup)
+  const contributions=[]; const pending={}
+  const creative={id:'creative-2',draftId:'d',runId:'r',title:'Race work',status:'rendered-unapproved',slideCount:3,slides:[{},{},{}]}
+  const ctx={register:x=>contributions.push(x),storage:{get:(_k,f)=>f,set(){}},rest:async path=>{
+    if(path==='/health')return {version:1}; if(path.startsWith('/workspace?'))return {revision:1,drafts:[],profiles:[]}; if(path==='/agent-runs')return {runs:[]};
+    if(path==='/creative-previews?app=Cherry')return {creatives:[creative]}
+    const n=Number(path.split('/').at(-1)); if(n===0)return {dataUrl:'data:image/png;base64,first',index:0}
+    return new Promise((resolve,reject)=>{pending[n]={resolve,reject}})
+  }}
+  loaded.default.register(ctx); let renderer
+  await act(async()=>{renderer=TestRenderer.create(contributions.find(x=>x.id==='page').render());await new Promise(r=>setTimeout(r,10))});t.after(()=>act(()=>renderer.unmount()))
+  const click=async label=>{const b=renderer.root.findAllByType('button').find(x=>x.props['aria-label']===label||textOf(x).includes(label));assert.ok(b,label);await act(async()=>{b.props.onClick();await new Promise(r=>setTimeout(r,0))})}
+  await click('Creatives');await click('Race work');await click('Show slide 2');await click('Show slide 3')
+  await act(async()=>{pending[2].resolve({dataUrl:'data:image/png;base64,third',index:2});await new Promise(r=>setTimeout(r,0))})
+  assert.equal(renderer.root.findByType('img').props.src,'data:image/png;base64,third')
+  await act(async()=>{pending[1].resolve({dataUrl:'data:image/png;base64,late-second',index:1});await new Promise(r=>setTimeout(r,0))})
+  assert.equal(renderer.root.findByType('img').props.src,'data:image/png;base64,third','late B cannot replace selected C')
+  await click('Show slide 2')
+  await act(async()=>{pending[1].reject(new Error('render unavailable'));await new Promise(r=>setTimeout(r,0))})
+  assert.equal(renderer.root.findByType('img').props.src,'data:image/png;base64,third','failed request keeps shown slide')
+  assert.match(JSON.stringify(renderer.toJSON()),/slide 3/,'status identifies the displayed slide')
+  assert.ok(renderer.root.findAllByType('button').some(button=>textOf(button).includes('Retry')),'retry recovery is available')
+})

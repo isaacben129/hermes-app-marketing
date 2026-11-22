@@ -186,7 +186,7 @@ function JobDetail({ job = null, onRetry, onPause, onResume }) {
 }
 
 // src/ui/CreativeGallery.js
-import React3, { useEffect, useState } from "react";
+import React3, { useEffect, useRef, useState } from "react";
 var h3 = React3.createElement;
 var iterationLabel = (value) => {
   const match = typeof value === "string" && /^iteration-([0-9]+)$/.exec(value);
@@ -195,7 +195,7 @@ var iterationLabel = (value) => {
 function CreativeCover({ api, item }) {
   const [src, setSrc] = useState("");
   const [failed, setFailed] = useState(false);
-  const node = React3.useRef(null);
+  const node = useRef(null);
   useEffect(() => {
     if (!node.current) return;
     let live = true;
@@ -228,9 +228,11 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
   const [items, setItems] = useState([]);
   const [selected, setSelected] = useState(null);
   const [slide, setSlide] = useState(0);
-  const [image, setImage] = useState(null);
+  const [displayed, setDisplayed] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [retry, setRetry] = useState(0);
+  const requestId = useRef(0);
   useEffect(() => {
     let live = true;
     api(`/creative-previews?app=${encodeURIComponent(selectedApp)}`).then((x) => {
@@ -245,18 +247,33 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
     };
   }, [selectedApp]);
   useEffect(() => {
+    const request = ++requestId.current;
     let live = true;
     setError("");
-    setImage(null);
-    if (selected) api(`/creative-previews/${encodeURIComponent(selected.runId)}/${encodeURIComponent(selected.id)}/slides/${slide}`).then((x) => {
-      if (live) setImage(x.dataUrl);
+    if (!selected) return () => {
+      live = false;
+    };
+    const creativeKey2 = `${selected.runId}/${selected.id}`;
+    api(`/creative-previews/${encodeURIComponent(selected.runId)}/${encodeURIComponent(selected.id)}/slides/${slide}`).then(async (result) => {
+      if (result.index !== void 0 && result.index !== slide) throw new Error("The service returned a different slide than requested.");
+      if (!result.dataUrl) throw new Error("The rendered slide has no image data.");
+      if (typeof Image !== "undefined") {
+        const decoded = new Image();
+        decoded.src = result.dataUrl;
+        if (typeof decoded.decode === "function") await decoded.decode();
+        else await new Promise((resolve, reject) => {
+          decoded.onload = resolve;
+          decoded.onerror = reject;
+        });
+      }
+      if (live && request === requestId.current) setDisplayed({ creativeKey: creativeKey2, index: slide, src: result.dataUrl });
     }).catch((e) => {
-      if (live) setError(e.message || "Rendered slide unavailable.");
+      if (live && request === requestId.current) setError(e.message || "Rendered slide unavailable.");
     });
     return () => {
       live = false;
     };
-  }, [selected, slide]);
+  }, [selected, slide, retry]);
   const panel4 = { border: "1px solid var(--ui-stroke-secondary)", borderRadius: 6, padding: 14, display: "grid", gap: 10 };
   if (loading) return h3("section", { role: "status" }, "Loading generated creatives\u2026");
   if (error && !selected) return h3("section", { style: panel4 }, h3("h2", null, "Generated creatives"), h3("p", { role: "alert" }, `Generated creatives are unavailable: ${error}`));
@@ -273,6 +290,7 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
         { key: item.id, onClick: () => {
           setSelected(item);
           setSlide(0);
+          setDisplayed(null);
         }, style: { ...panel4, color: "inherit", textAlign: "left", cursor: "pointer" } },
         h3(CreativeCover, { api, item }),
         h3("strong", null, item.title),
@@ -281,6 +299,9 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
       ))
     )
   );
+  const creativeKey = `${selected.runId}/${selected.id}`;
+  const shown = displayed?.creativeKey === creativeKey ? displayed : null;
+  const shownLabel = shown ? `Showing ${selected.title}, slide ${shown.index + 1}` : `No slide is currently displayed for ${selected.title}`;
   const buttons = selected.slides.map((_, i) => h3("button", { key: i, onClick: () => setSlide(i), "aria-label": `Show slide ${i + 1}`, "aria-current": slide === i ? "true" : void 0 }, `Slide ${i + 1}`));
   const reviews = (selected.qualityReviews || []).map((r, i) => h3("li", { key: i }, `${r.dimension}: ${r.score ?? "not scored"}${r.rationale ? ` \u2014 ${r.rationale}` : ""}`));
   const blockers = (selected.hardBlockers || []).map((b, i) => h3("p", { key: i }, `Blocker: ${typeof b === "string" ? b : JSON.stringify(b)}`));
@@ -293,7 +314,16 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
       { style: panel4 },
       h3("h3", null, selected.title),
       h3("span", { role: "status" }, `Unapproved \xB7 ${selected.status} \xB7 ${iterationLabel(selected.iteration)}`),
-      image ? h3("img", { alt: `${selected.title}, slide ${slide + 1}`, src: image, style: { maxHeight: "65vh", maxWidth: "100%", objectFit: "contain", justifySelf: "center" } }) : error ? h3("p", { role: "alert" }, `Rendered slide unavailable: ${error}`) : h3("span", { role: "status" }, "Loading rendered slide\u2026"),
+      h3(
+        "div",
+        { "aria-label": "Portrait slide stage", style: { position: "relative", width: "min(100%, calc(65vh * 9 / 16))", aspectRatio: "9 / 16", maxHeight: "65vh", margin: "auto", overflow: "hidden", background: "var(--ui-bg-secondary)", display: "grid", placeItems: "center" } },
+        shown && h3("img", { alt: `${selected.title}, slide ${shown.index + 1}`, src: shown.src, style: { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" } }),
+        (error || shown?.index !== slide) && h3("span", { role: error ? "alert" : "status", style: { position: "absolute", zIndex: 1, left: 8, right: 8, bottom: 8, padding: 8, background: "rgba(0,0,0,.72)", color: "white", textAlign: "center" } }, error ? `Slide ${slide + 1} unavailable. ${shownLabel}` : `Loading slide ${slide + 1}. ${shownLabel}`)
+      ),
+      error && h3("button", { onClick: () => {
+        setError("");
+        setRetry((value) => value + 1);
+      } }, "Retry slide"),
       h3("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } }, ...buttons, h3("button", { onClick: () => setSlide(Math.max(0, slide - 1)), disabled: slide === 0 }, "Previous"), h3("button", { onClick: () => setSlide(Math.min(selected.slideCount - 1, slide + 1)), disabled: slide >= selected.slideCount - 1 }, "Next")),
       h3("h4", null, "Critique scores"),
       h3("ul", null, ...reviews),
@@ -311,6 +341,7 @@ function CreativeGallery({ api, openDraft, selectedApp = "Cherry" }) {
       h3("button", { onClick: () => {
         setSelected(null);
         setSlide(0);
+        setDisplayed(null);
         setError("");
       } }, "Back to creatives")
     )
@@ -703,75 +734,6 @@ function MarketingPage({ ctx }) {
   const records = workspace?.drafts || [];
   const thumbnails = (rendered?.slides || []).map((s, i) => h4("button", { key: i, "aria-label": `Show slide ${i + 1}`, onClick: () => setActive(i), "aria-current": active === i ? "true" : void 0, style: { width: 52, height: 92, flex: "0 0 auto", padding: 0 } }, h4("img", { alt: "", src: `data:image/png;base64,${s.pngBase64 || s.png || ""}`, style: { width: "100%", height: "100%", objectFit: "contain" } })));
   const renderPanel = rendered && h4("section", { style: panel3 }, h4("h3", null, "Portrait preview"), h4("img", { alt: `Rendered slide ${active + 1}`, src: `data:image/png;base64,${rendered.slides?.[active]?.pngBase64 || rendered.slides?.[active]?.png || ""}`, style: { height: "min(62vh, 720px)", maxWidth: "100%", objectFit: "contain" } }), h4("div", { style: { display: "flex", gap: 8, overflowX: "auto" }, role: "list", "aria-label": "Rendered slide thumbnails" }, thumbnails));
-  const SYNTHETIC_DEMO = {
-    id: "synthetic-demo-preview",
-    title: "Synthetic Demo \xB7 Cherry Concept Campaign",
-    stage: "demo",
-    hook: "AI-powered habit stacking for busy professionals",
-    brief: "A 4-slide concept showing how Cherry helps users build lasting routines through intelligent habit stacking and contextual reminders.",
-    slides: [
-      { headline: "Stop relying on willpower", body: "Cherry stacks new habits onto existing routines \u2014 no extra effort, just smart timing." },
-      { headline: "Context-aware reminders", body: "Location, time, and activity signals trigger the right nudge at the right moment." },
-      { headline: "Progress that compounds", body: "Micro-wins visualized daily. Streaks, patterns, and gentle course correction." },
-      { headline: "Your routine, evolved", body: "Export your stack, share with accountability partners, or let Cherry optimize it." }
-    ],
-    source: { evidence: "Synthetic fixture \u2014 not a real campaign. No external data, claims, or rights implied.", claim: "unreviewed", rights: "unknown" }
-  };
-  const SyntheticDemoBanner = () => {
-    const slideCards = SYNTHETIC_DEMO.slides.map(
-      (slide, i) => h4(
-        "article",
-        {
-          key: i,
-          style: {
-            ...panel3,
-            padding: 12,
-            display: "grid",
-            gap: 6,
-            border: "1px solid var(--ui-stroke-tertiary)",
-            background: "var(--ui-bg-secondary)",
-            minHeight: 100
-          }
-        },
-        h4(
-          "div",
-          { style: { display: "flex", alignItems: "center", gap: 8 } },
-          h4("span", { style: { width: 24, height: 24, borderRadius: "50%", background: "var(--ui-accent, #0066cc)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", fontWeight: 700, flexShrink: 0 } }, String(i + 1)),
-          h4("h4", { style: { margin: 0, fontSize: "0.9rem", fontWeight: 600 } }, slide.headline)
-        ),
-        h4("p", { style: { margin: 0, color: "var(--ui-text-secondary)", fontSize: "0.85rem", lineHeight: 1.4 } }, slide.body)
-      )
-    );
-    return h4(
-      "section",
-      {
-        style: {
-          ...panel3,
-          border: "2px dashed var(--ui-accent, #0066cc)",
-          background: "linear-gradient(135deg, rgba(0,102,204,0.06) 0%, rgba(0,102,204,0.02) 100%)",
-          position: "relative",
-          overflow: "hidden"
-        }
-      },
-      h4("div", { style: { position: "absolute", top: -20, right: -20, width: 120, height: 120, borderRadius: "50%", background: "rgba(0,102,204,0.05)", pointerEvents: "none" } }),
-      h4(
-        "header",
-        { style: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 } },
-        h4("span", { style: { display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "var(--ui-accent, #0066cc)", color: "#fff", borderRadius: 999, fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" } }, "\u26A0 SYNTHETIC DEMO"),
-        h4("span", { style: { color: "var(--ui-text-secondary)", fontSize: "0.85rem" } }, "Read-only preview \u2014 no data is saved, synced, or sent to the service")
-      ),
-      h4(
-        "p",
-        { style: { margin: 0, color: "var(--ui-text-primary)", fontSize: "0.95rem", lineHeight: 1.5 } },
-        "This preview demonstrates the Marketing Overview layout with realistic campaign data. ",
-        h4("strong", null, "All content is synthetic and fixture-labeled."),
-        " It never enters the service, ledger, local storage, or any persistent record. Use ",
-        h4("code", { style: { background: "var(--ui-bg-tertiary)", padding: "2px 6px", borderRadius: 4 } }, "New draft"),
-        " to create a real, editable draft."
-      ),
-      h4("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginTop: 12 } }, ...slideCards)
-    );
-  };
   const MetricCard = ({ label, value, status }) => h4("section", {
     style: {
       ...panel3,
@@ -885,7 +847,6 @@ function MarketingPage({ ctx }) {
       )
     ),
     h4("section", { style: panel3 }, button("Generate and critique 5 Cherry slideshows", runAgent, !connected), h4("p", null, "Runs locally through the connected agent service. Results are unapproved; this action does not schedule or publish content."), agentRuns.length > 0 && h4("div", { "aria-label": "Saved agent runs" }, h4("strong", null, `${agentRuns.length} saved agent run${agentRuns.length === 1 ? "" : "s"}`), ...agentRuns.map((run) => button(`Open run ${run.runId} \xB7 ${run.status}`, () => openAgentRun(run.runId)))), agentRun && h4("div", null, h4("p", { role: "status", "aria-live": "polite" }, `Agent run ${agentRun.runId || ""}: ${agentRun.status}${agentRun.stage ? ` \xB7 ${agentRun.stage}` : ""}${agentRun.completedCount != null ? ` \xB7 ${agentRun.completedCount} completed` : ""}`), !["succeeded", "failed", "cancelled", "interrupted"].includes(agentRun.status) && button("Refresh agent run status", refreshAgentRun))),
-    h4(SyntheticDemoBanner),
     h4(
       "section",
       {
@@ -905,7 +866,7 @@ function MarketingPage({ ctx }) {
         h4("h3", { style: { margin: 0, fontSize: "1rem" } }, "Saved drafts"),
         records.length > 0 ? h4("span", { style: { fontSize: "0.75rem", color: "var(--ui-text-tertiary)", textTransform: "uppercase", letterSpacing: "0.05em" } }, `${records.length} draft${records.length !== 1 ? "s" : ""}`) : null
       ),
-      records.length > 0 ? h4("div", { style: { display: "grid", gap: 8 } }, ...records.map((item) => h4(DraftListItem, { item, onClick: () => openDraft(item) }))) : h4("div", { style: { textAlign: "center", padding: "24px 12px", color: "var(--ui-text-tertiary)" } }, h4("p", { style: { margin: "0 0 8px" } }, "No drafts saved yet. Create your first draft or explore the synthetic demo above."), h4("p", { style: { margin: 0, fontSize: "0.85rem" } }, "Drafts are stored in the service workspace and survive reload."))
+      records.length > 0 ? h4("div", { style: { display: "grid", gap: 8 } }, ...records.map((item) => h4(DraftListItem, { item, onClick: () => openDraft(item) }))) : h4("div", { style: { textAlign: "center", padding: "24px 12px", color: "var(--ui-text-tertiary)" } }, h4("p", { style: { margin: "0 0 8px" } }, "No drafts saved yet. Create your first draft."), h4("p", { style: { margin: 0, fontSize: "0.85rem" } }, "Drafts are stored in the service workspace and survive reload."))
     ),
     h4("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" } }, button("Sync Postiz (read only)", async () => {
       try {

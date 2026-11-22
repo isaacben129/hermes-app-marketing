@@ -210,68 +210,6 @@ function MarketingPage({ ctx }) {
   const thumbnails = (rendered?.slides || []).map((s, i) => h('button', { key: i, 'aria-label': `Show slide ${i + 1}`, onClick: () => setActive(i), 'aria-current': active === i ? 'true' : undefined, style: { width: 52, height: 92, flex: '0 0 auto', padding: 0 } }, h('img', { alt: '', src: `data:image/png;base64,${s.pngBase64 || s.png || ''}`, style: { width: '100%', height: '100%', objectFit: 'contain' } })))
   const renderPanel = rendered && h('section', { style: panel }, h('h3', null, 'Portrait preview'), h('img', { alt: `Rendered slide ${active + 1}`, src: `data:image/png;base64,${rendered.slides?.[active]?.pngBase64 || rendered.slides?.[active]?.png || ''}`, style: { height: 'min(62vh, 720px)', maxWidth: '100%', objectFit: 'contain' } }), h('div', { style: { display: 'flex', gap: 8, overflowX: 'auto' }, role: 'list', 'aria-label': 'Rendered slide thumbnails' }, thumbnails))
 
-  const SYNTHETIC_DEMO = {
-    id: 'synthetic-demo-preview',
-    title: 'Synthetic Demo · Cherry Concept Campaign',
-    stage: 'demo',
-    hook: 'AI-powered habit stacking for busy professionals',
-    brief: 'A 4-slide concept showing how Cherry helps users build lasting routines through intelligent habit stacking and contextual reminders.',
-    slides: [
-      { headline: 'Stop relying on willpower', body: 'Cherry stacks new habits onto existing routines — no extra effort, just smart timing.' },
-      { headline: 'Context-aware reminders', body: 'Location, time, and activity signals trigger the right nudge at the right moment.' },
-      { headline: 'Progress that compounds', body: 'Micro-wins visualized daily. Streaks, patterns, and gentle course correction.' },
-      { headline: 'Your routine, evolved', body: 'Export your stack, share with accountability partners, or let Cherry optimize it.' }
-    ],
-    source: { evidence: 'Synthetic fixture — not a real campaign. No external data, claims, or rights implied.', claim: 'unreviewed', rights: 'unknown' }
-  }
-
-  const SyntheticDemoBanner = () => {
-    const slideCards = SYNTHETIC_DEMO.slides.map((slide, i) =>
-      h('article', {
-        key: i,
-        style: {
-          ...panel,
-          padding: 12,
-          display: 'grid',
-          gap: 6,
-          border: '1px solid var(--ui-stroke-tertiary)',
-          background: 'var(--ui-bg-secondary)',
-          minHeight: 100
-        }
-      },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-          h('span', { style: { width: 24, height: 24, borderRadius: '50%', background: 'var(--ui-accent, #0066cc)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, flexShrink: 0 } }, String(i + 1)),
-          h('h4', { style: { margin: 0, fontSize: '0.9rem', fontWeight: 600 } }, slide.headline)
-        ),
-        h('p', { style: { margin: 0, color: 'var(--ui-text-secondary)', fontSize: '0.85rem', lineHeight: 1.4 } }, slide.body)
-      )
-    )
-
-    return h('section', {
-      style: {
-        ...panel,
-        border: '2px dashed var(--ui-accent, #0066cc)',
-        background: 'linear-gradient(135deg, rgba(0,102,204,0.06) 0%, rgba(0,102,204,0.02) 100%)',
-        position: 'relative',
-        overflow: 'hidden'
-      }
-    },
-      h('div', { style: { position: 'absolute', top: -20, right: -20, width: 120, height: 120, borderRadius: '50%', background: 'rgba(0,102,204,0.05)', pointerEvents: 'none' } }),
-      h('header', { style: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 } },
-        h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: 'var(--ui-accent, #0066cc)', color: '#fff', borderRadius: 999, fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase' } }, '⚠ SYNTHETIC DEMO'),
-        h('span', { style: { color: 'var(--ui-text-secondary)', fontSize: '0.85rem' } }, 'Read-only preview — no data is saved, synced, or sent to the service')
-      ),
-      h('p', { style: { margin: 0, color: 'var(--ui-text-primary)', fontSize: '0.95rem', lineHeight: 1.5 } },
-        'This preview demonstrates the Marketing Overview layout with realistic campaign data. ',
-        h('strong', null, 'All content is synthetic and fixture-labeled.'),
-        ' It never enters the service, ledger, local storage, or any persistent record. Use ',
-        h('code', { style: { background: 'var(--ui-bg-tertiary)', padding: '2px 6px', borderRadius: 4 } }, 'New draft'),
-        ' to create a real, editable draft.'
-      ),
-      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginTop: 12 } }, ...slideCards)
-    )
-  }
-
   const MetricCard = ({ label, value, status }) => h('section', {
     style: {
       ...panel,
@@ -325,7 +263,6 @@ function MarketingPage({ ctx }) {
         )
       ),
       h('section', { style: panel }, button('Generate and critique 5 Cherry slideshows', runAgent, !connected), h('p', null, 'Runs locally through the connected agent service. Results are unapproved; this action does not schedule or publish content.'), agentRuns.length > 0 && h('div', { 'aria-label': 'Saved agent runs' }, h('strong', null, `${agentRuns.length} saved agent run${agentRuns.length === 1 ? '' : 's'}`), ...agentRuns.map(run => button(`Open run ${run.runId} · ${run.status}`, () => openAgentRun(run.runId)))), agentRun && h('div', null, h('p', { role: 'status', 'aria-live': 'polite' }, `Agent run ${agentRun.runId || ''}: ${agentRun.status}${agentRun.stage ? ` · ${agentRun.stage}` : ''}${agentRun.completedCount != null ? ` · ${agentRun.completedCount} completed` : ''}`), !['succeeded', 'failed', 'cancelled', 'interrupted'].includes(agentRun.status) && button('Refresh agent run status', refreshAgentRun))),
-      h(SyntheticDemoBanner),
       h('section', {
         style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 },
         'aria-label': 'Key metrics'
@@ -339,7 +276,7 @@ function MarketingPage({ ctx }) {
           h('h3', { style: { margin: 0, fontSize: '1rem' } }, 'Saved drafts'),
           records.length > 0 ? h('span', { style: { fontSize: '0.75rem', color: 'var(--ui-text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' } }, `${records.length} draft${records.length !== 1 ? 's' : ''}`) : null
         ),
-        records.length > 0 ? h('div', { style: { display: 'grid', gap: 8 } }, ...records.map(item => h(DraftListItem, { item, onClick: () => openDraft(item) }))) : h('div', { style: { textAlign: 'center', padding: '24px 12px', color: 'var(--ui-text-tertiary)' } }, h('p', { style: { margin: '0 0 8px' } }, 'No drafts saved yet. Create your first draft or explore the synthetic demo above.'), h('p', { style: { margin: 0, fontSize: '0.85rem' } }, 'Drafts are stored in the service workspace and survive reload.'))
+        records.length > 0 ? h('div', { style: { display: 'grid', gap: 8 } }, ...records.map(item => h(DraftListItem, { item, onClick: () => openDraft(item) }))) : h('div', { style: { textAlign: 'center', padding: '24px 12px', color: 'var(--ui-text-tertiary)' } }, h('p', { style: { margin: '0 0 8px' } }, 'No drafts saved yet. Create your first draft.'), h('p', { style: { margin: 0, fontSize: '0.85rem' } }, 'Drafts are stored in the service workspace and survive reload.'))
       ),
       h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, button('Sync Postiz (read only)', async () => { try { const result = await api('/api/postiz/sync', { method: 'POST', body: JSON.stringify({ app: selectedApp, window: { start: new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10), end: new Date().toISOString().slice(0, 10) }, days: 30 }) }); setNotice(result.status === 'blocked' && result.error?.code === 'channel_unconfigured' ? `Postiz is reachable. Configure ${result.integrations?.length || 0} integration(s) in this app's approved profile.` : `Postiz sync: ${result.status}${result.platformAnalyticsStatus ? ` · channel analytics ${result.platformAnalyticsStatus}` : ''}${result.posts?.length != null ? ` · ${result.posts.length} matched posts` : ''}`); await reload() } catch (e) { setError(e.message) } }, !connected))
     )

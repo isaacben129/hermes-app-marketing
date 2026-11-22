@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 const h = React.createElement
 const iterationLabel = value => {
@@ -8,7 +8,7 @@ const iterationLabel = value => {
 function CreativeCover({ api, item }) {
   const [src, setSrc] = useState('')
   const [failed, setFailed] = useState(false)
-  const node = React.useRef(null)
+  const node = useRef(null)
   useEffect(() => {
     if (!node.current) return
     let live = true
@@ -24,9 +24,11 @@ export default function CreativeGallery({ api, openDraft, selectedApp = 'Cherry'
   const [items, setItems] = useState([])
   const [selected, setSelected] = useState(null)
   const [slide, setSlide] = useState(0)
-  const [image, setImage] = useState(null)
+  const [displayed, setDisplayed] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const [retry, setRetry] = useState(0)
+  const requestId = useRef(0)
   useEffect(() => {
     let live = true
     api(`/creative-previews?app=${encodeURIComponent(selectedApp)}`).then(x => { if (live) setItems(x.creatives || []) })
@@ -35,14 +37,26 @@ export default function CreativeGallery({ api, openDraft, selectedApp = 'Cherry'
     return () => { live = false }
   }, [selectedApp])
   useEffect(() => {
+    const request = ++requestId.current
     let live = true
     setError('')
-    setImage(null)
-    if (selected) api(`/creative-previews/${encodeURIComponent(selected.runId)}/${encodeURIComponent(selected.id)}/slides/${slide}`)
-      .then(x => { if (live) setImage(x.dataUrl) })
-      .catch(e => { if (live) setError(e.message || 'Rendered slide unavailable.') })
+    if (!selected) return () => { live = false }
+    const creativeKey = `${selected.runId}/${selected.id}`
+    api(`/creative-previews/${encodeURIComponent(selected.runId)}/${encodeURIComponent(selected.id)}/slides/${slide}`)
+      .then(async result => {
+        if (result.index !== undefined && result.index !== slide) throw new Error('The service returned a different slide than requested.')
+        if (!result.dataUrl) throw new Error('The rendered slide has no image data.')
+        if (typeof Image !== 'undefined') {
+          const decoded = new Image()
+          decoded.src = result.dataUrl
+          if (typeof decoded.decode === 'function') await decoded.decode()
+          else await new Promise((resolve, reject) => { decoded.onload = resolve; decoded.onerror = reject })
+        }
+        if (live && request === requestId.current) setDisplayed({ creativeKey, index: slide, src: result.dataUrl })
+      })
+      .catch(e => { if (live && request === requestId.current) setError(e.message || 'Rendered slide unavailable.') })
     return () => { live = false }
-  }, [selected, slide])
+  }, [selected, slide, retry])
   const panel = { border: '1px solid var(--ui-stroke-secondary)', borderRadius: 6, padding: 14, display: 'grid', gap: 10 }
   if (loading) return h('section', { role: 'status' }, 'Loading generated creatives…')
   if (error && !selected) return h('section', { style: panel }, h('h2', null, 'Generated creatives'), h('p', { role: 'alert' }, `Generated creatives are unavailable: ${error}`))
@@ -50,16 +64,23 @@ export default function CreativeGallery({ api, openDraft, selectedApp = 'Cherry'
   if (!selected) return h('section', { style: { display: 'grid', gap: 14 } },
     h('h2', null, 'Generated creatives'),
     h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12 } },
-      ...items.map(item => h('button', { key: item.id, onClick: () => { setSelected(item); setSlide(0) }, style: { ...panel, color: 'inherit', textAlign: 'left', cursor: 'pointer' } },
+      ...items.map(item => h('button', { key: item.id, onClick: () => { setSelected(item); setSlide(0); setDisplayed(null) }, style: { ...panel, color: 'inherit', textAlign: 'left', cursor: 'pointer' } },
         h(CreativeCover, { api, item }), h('strong', null, item.title), h('span', null, `Unapproved · ${item.status}`), h('span', null, `${item.slideCount} rendered slides · ${iterationLabel(item.iteration)}`)))))
+  const creativeKey = `${selected.runId}/${selected.id}`
+  const shown = displayed?.creativeKey === creativeKey ? displayed : null
+  const shownLabel = shown ? `Showing ${selected.title}, slide ${shown.index + 1}` : `No slide is currently displayed for ${selected.title}`
   const buttons = selected.slides.map((_, i) => h('button', { key: i, onClick: () => setSlide(i), 'aria-label': `Show slide ${i + 1}`, 'aria-current': slide === i ? 'true' : undefined }, `Slide ${i + 1}`))
   const reviews = (selected.qualityReviews || []).map((r, i) => h('li', { key: i }, `${r.dimension}: ${r.score ?? 'not scored'}${r.rationale ? ` — ${r.rationale}` : ''}`))
   const blockers = (selected.hardBlockers || []).map((b, i) => h('p', { key: i }, `Blocker: ${typeof b === 'string' ? b : JSON.stringify(b)}`))
   return h('section', { style: { display: 'grid', gap: 14 } }, h('h2', null, 'Generated creatives'),
     h('article', { style: panel }, h('h3', null, selected.title), h('span', { role: 'status' }, `Unapproved · ${selected.status} · ${iterationLabel(selected.iteration)}`),
-      image ? h('img', { alt: `${selected.title}, slide ${slide + 1}`, src: image, style: { maxHeight: '65vh', maxWidth: '100%', objectFit: 'contain', justifySelf: 'center' } }) : error ? h('p', { role: 'alert' }, `Rendered slide unavailable: ${error}`) : h('span', { role: 'status' }, 'Loading rendered slide…'),
+      h('div', { 'aria-label': 'Portrait slide stage', style: { position: 'relative', width: 'min(100%, calc(65vh * 9 / 16))', aspectRatio: '9 / 16', maxHeight: '65vh', margin: 'auto', overflow: 'hidden', background: 'var(--ui-bg-secondary)', display: 'grid', placeItems: 'center' } },
+        shown && h('img', { alt: `${selected.title}, slide ${shown.index + 1}`, src: shown.src, style: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' } }),
+        (error || shown?.index !== slide) && h('span', { role: error ? 'alert' : 'status', style: { position: 'absolute', zIndex: 1, left: 8, right: 8, bottom: 8, padding: 8, background: 'rgba(0,0,0,.72)', color: 'white', textAlign: 'center' } }, error ? `Slide ${slide + 1} unavailable. ${shownLabel}` : `Loading slide ${slide + 1}. ${shownLabel}`),
+      ),
+      error && h('button', { onClick: () => { setError(''); setRetry(value => value + 1) } }, 'Retry slide'),
       h('div', { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } }, ...buttons, h('button', { onClick: () => setSlide(Math.max(0, slide - 1)), disabled: slide === 0 }, 'Previous'), h('button', { onClick: () => setSlide(Math.min(selected.slideCount - 1, slide + 1)), disabled: slide >= selected.slideCount - 1 }, 'Next')),
       h('h4', null, 'Critique scores'), h('ul', null, ...reviews), ...blockers,
       h('button', { onClick: async () => { try { const workspace = await api(`/api/workspace?app=${encodeURIComponent(selectedApp)}`); const draft = workspace.drafts?.find(item => item.id === selected.draftId && item.app === selectedApp); if (!draft) throw new Error('No saved editable draft is linked to this generated result.'); openDraft(draft) } catch (e) { setError(e.message || 'Saved draft is unavailable.') } } }, 'Edit draft'),
-      h('button', { onClick: () => { setSelected(null); setSlide(0); setError('') } }, 'Back to creatives')))
+      h('button', { onClick: () => { setSelected(null); setSlide(0); setDisplayed(null); setError('') } }, 'Back to creatives')))
 }

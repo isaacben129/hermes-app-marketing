@@ -40,7 +40,7 @@ test('Overview renders desktop-first responsive layout with key sections', async
   assert.match(overviewStr, /New draft/, 'New draft button present')
 })
 
-test('Overview synthetic demo preview is read-only and conspicuously labeled', async t => {
+test('Overview contains only service drafts and keeps a real draft openable', async t => {
   const loaded = await loadPlugin(); t.after(loaded.cleanup)
   const registry = []; const values = new Map()
   loaded.default.register({
@@ -51,7 +51,7 @@ test('Overview synthetic demo preview is read-only and conspicuously labeled', a
   const oldFetch = globalThis.fetch
   globalThis.fetch = async (url) => {
     if (String(url).endsWith('/api/health')) return Response.json({ status: 'ok' })
-    if (String(url).includes('/api/workspace')) return Response.json({ revision: 5, profiles: [], drafts: [], observations: [], decisions: [], posts: [] })
+    if (String(url).includes('/api/workspace')) return Response.json({ revision: 5, profiles: [], drafts: [{ id: 'real-1', title: 'Real saved draft', app: 'Cherry', slides: [], qualityReviews: [] }], observations: [], decisions: [], posts: [] })
     throw new Error(`Unexpected request ${url}`)
   }
   t.after(() => { globalThis.fetch = oldFetch })
@@ -65,8 +65,12 @@ test('Overview synthetic demo preview is read-only and conspicuously labeled', a
   await click('Connect')
   await click('Overview')
   const overviewStr = JSON.stringify(renderer.toJSON())
-  assert.match(overviewStr, /Synthetic demo|Demo preview|Read-only demo/i, 'Synthetic demo preview label present')
-  assert.match(overviewStr, /read.only|read only|demo only|not persisted|not saved|UI.only|UI only/i, 'Read-only/conspicuous warning present')
+  assert.doesNotMatch(overviewStr, /Synthetic demo|Demo preview|Read-only demo|habit stacking|concept campaign/i)
+  assert.match(overviewStr, /Real saved draft/)
+  const draft = renderer.root.findAllByType('button').find(node => node.findAllByType('div').some(div => div.children.includes('Real saved draft')))
+  assert.ok(draft, 'real saved draft is available to open')
+  await act(async () => { draft.props.onClick(); await tick() })
+  assert.match(JSON.stringify(renderer.toJSON()), /Real saved draft/)
 })
 
 test('Synthetic demo data never enters operations or persistent records', async t => {
